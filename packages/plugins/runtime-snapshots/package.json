@@ -1,0 +1,23 @@
+{
+  "name": "@aibot2/runtime-snapshots",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O inventário de snapshots por worker (M10): registro digest→estado do que está aquecido em cada PC, decisão hit/miss content-addressed (mudou o manifest, mudou a chave — invalidação por construção), anúncio nas capabilities que o scheduler já pontua como localidade, e poda LRU. Snapshots são CACHE DESCARTÁVEL e nunca fonte de verdade (spec §29): sumir é sempre seguro, a próxima tarefa reinstala — e nenhum segredo entra no inventário (só base/digest/imagem/relógio; o conteúdo dos locks fica no fingerprint e morre lá). Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-runtime": "workspace:*",
+    "@aibot2/domain-workers": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@aibot2/cluster-scheduler": "workspace:*"
+  }
+}

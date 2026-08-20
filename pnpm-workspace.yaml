@@ -2,6 +2,7 @@ packages:
   - server
   - shared
   - worker-daemon
+  - agent-computer
   - packages/harness-kernel
   - packages/harness-openbot-bridge
   - packages/domain/*

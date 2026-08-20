@@ -1,0 +1,22 @@
+{
+  "name": "@aibot2/plugin-browser-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O seam ctx.browser do kernel: cliente HTTP do agent-computer ({baseUrl, token}) com a REGRA task-scoped da spec §32 — abrir navegador exige um EXECUTION TARGET {taskRunId, workerId, leaseEpoch, runtimeId} de uma TaskRun cujo plano declarou requirements.browser=true; sem target (ou sem o requisito) é RECUSA com motivo, antes de qualquer HTTP. Fechar é automático no fim da TaskRun: o open registra o close como disposer do kernel no escopo do dono. Bot ocioso consome ZERO navegadores. Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-runtime": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@aibot2/agent-computer": "workspace:*"
+  }
+}

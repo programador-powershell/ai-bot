@@ -12,6 +12,27 @@ export {
 } from './runtime.js'
 
 export {
+  DockerContainerRuntime,
+  EPOCH_LABEL,
+  OWNER_LABEL,
+  TASK_RUN_LABEL,
+  WORKER_LABEL,
+  announceDocker,
+  containerNameFor,
+  demuxDockerLogs,
+  detectContainerRuntime,
+  dockerodeEngine,
+  type DetectOptions,
+  type DetectedRuntime,
+  type DockerEngine,
+  type DockerRuntimeOptions,
+  type EngineContainer,
+  type EngineCreateOptions,
+  type EngineHostConfig,
+  type OwnedContainerRef,
+} from './docker-runtime.js'
+
+export {
   createWorkerDaemon,
   type AssignedLease,
   type ReportedEvent,

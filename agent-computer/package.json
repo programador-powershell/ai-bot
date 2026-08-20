@@ -1,0 +1,18 @@
+{
+  "name": "@aibot2/agent-computer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O computador do agente: processo Node próprio (node:http, o mesmo estilo do worker-daemon) segurando Playwright/Chromium REAL. A cirurgia da spec §3/§32: contexto de browser por RUNTIME/TASK — nasce em /session/{runtimeId}/open e morre em /close; nenhum botId→computador permanente. Snapshot ARIA mode:\"ai\" com allowlist de roles, teto de 200 elementos e refs e{N}; /act por ref (click/type/press); egress anti-SSRF que resolve DNS e bloqueia IP privado DEPOIS de resolver; Take the Wheel — humano no controle = ação do bot RECUSADA, nunca enfileirada. Porte adaptado do agent-computer do openbot (MIT, pin 06a1a84) — ver THIRD_PARTY_NOTICES.md na raiz. Screencast fica FORA desta leva (pendência declarada).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}

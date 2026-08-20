@@ -3,11 +3,12 @@
  *
  * A regra do cluster é "worker é computador, CONTAINER É EXECUÇÃO" (R8): a
  * execução nasce para a tarefa e morre com o estrago dentro; o resultado só
- * existe se publicado e promovido. O Docker (dockerode) AGUARDA aprovação
- * TI/SI — quando entrar, ele implementa EXATAMENTE esta interface, e o daemon
- * não muda uma linha. Até lá, o executor local em processo cumpre o contrato
- * na mesma máquina (a nota de escopo do M1: loopback primeiro, multi-PC é
- * deploy, não redesign).
+ * existe se publicado e promovido. O Docker (dockerode, aprovado em M11)
+ * implementa EXATAMENTE esta interface em docker-runtime.ts — o daemon não
+ * mudou uma linha, que era o propósito do seam. O executor local em processo
+ * continua cumprindo o contrato quando não há engine (detecção honesta em
+ * detectContainerRuntime — a nota de escopo do M1: loopback primeiro,
+ * multi-PC é deploy, não redesign).
  */
 
 import { spawn } from 'node:child_process'
@@ -19,9 +20,16 @@ export interface ExecutionSpec {
   plan: WorkspacePlan
   /** O root local materializado NESTA máquina (nunca veio no plano). */
   localRoot: string
-  /** O comando a executar (executor local). O supervisor Docker terá imagem+cmd. */
+  /** O comando a executar — vetor já aprovado pelo control plane. */
   command: string[]
   env?: Record<string, string>
+  /** A imagem da execução no runtime docker (o executor local a ignora). */
+  image?: string
+  /**
+   * A tarefa declarou requirements.network? A decisão vem PRONTA do control
+   * plane — sem declaração, a execução docker nasce SEM rede (fail-closed).
+   */
+  network?: boolean
 }
 
 export interface ExecutionResult {

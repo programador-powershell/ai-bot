@@ -2,7 +2,7 @@
   "name": "@aibot2/worker-daemon",
   "version": "0.1.0",
   "private": true,
-  "description": "O daemon do PC físico sobre node:http: os 9 verbos da spec §36 (health/capabilities/acquire/prepare/materialize/start/cancel/publish/result/renew), token compartilhado do enrolamento, executor local em processo atrás do seam ContainerRuntime (Docker/dockerode AGUARDA TI/SI e entra pela MESMA interface). O daemon EXECUTA e reporta eventos — NUNCA grava seq (o sequenciador é do server) e NUNCA expõe Docker passthrough. Zero dependências de runtime fora do workspace.",
+  "description": "O daemon do PC físico sobre node:http: os 9 verbos da spec §36 (health/capabilities/acquire/prepare/materialize/start/cancel/publish/result/renew), token compartilhado do enrolamento e o seam ContainerRuntime com DUAS implementações — o executor local em processo e o Docker real via dockerode (aprovado M11): container efêmero por TaskRun com o hardening §37 (CapDrop ALL, no-new-privileges, tetos de RAM/CPU/PIDs, workspace montado, rede fail-closed, SEM socket dentro). Detecção honesta: sem engine, o daemon anuncia capabilities sem docker e o executor local continua. O daemon EXECUTA e reporta eventos — NUNCA grava seq (o sequenciador é do server) e NUNCA expõe Docker passthrough.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,6 +15,10 @@
   "dependencies": {
     "@aibot2/domain-runtime": "workspace:*",
     "@aibot2/domain-workers": "workspace:*",
-    "@aibot2/domain-workspace": "workspace:*"
+    "@aibot2/domain-workspace": "workspace:*",
+    "dockerode": "^4.0.12"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^4.0.1"
   }
 }

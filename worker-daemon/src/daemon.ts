@@ -300,12 +300,20 @@ export function createWorkerDaemon(config: WorkerDaemonConfig): WorkerDaemon {
         const command = Array.isArray(body['command'])
           ? (body['command'] as string[])
           : []
+        // Imagem e rede chegam DECIDIDAS pelo control plane (a rede veio dos
+        // requirements da tarefa); o daemon repassa, nunca decide — os campos
+        // só existem no spec quando vieram, para o runtime aplicar o
+        // fail-closed dele (sem network declarado = sem rede).
+        const image = typeof body['image'] === 'string' ? body['image'] : undefined
+        const network = typeof body['network'] === 'boolean' ? body['network'] : undefined
         try {
           const handleStarted = await config.runtime.start({
             taskRunId: assignment.taskRunId,
             plan: assignment.plan,
             localRoot: assignment.localRoot,
             command,
+            ...(image !== undefined ? { image } : {}),
+            ...(network !== undefined ? { network } : {}),
           })
           assignment.handle = handleStarted
           report(assignment, 'task.progress', {

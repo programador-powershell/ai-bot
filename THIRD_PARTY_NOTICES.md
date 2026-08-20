@@ -1,0 +1,65 @@
+# Avisos de terceiros (THIRD PARTY NOTICES)
+
+Este repositório contém código PORTADO E ADAPTADO de projetos de terceiros.
+Este arquivo preserva as atribuições exigidas pelas licenças — e as que o
+próprio projeto de origem declara.
+
+## openbot — MIT
+
+- **O quê:** o `agent-computer/` deste repositório é porte adaptado do
+  `agent-computer` do openbot (parser de snapshot ARIA com allowlist de roles,
+  máquina de estados Take the Wheel, verificação de alvo de navegação — esta
+  última estendida aqui com resolução de DNS —, e a forma geral do servidor
+  HTTP do computador). O `packages/plugins/browser-runtime` deriva o contrato
+  de cliente do mesmo projeto.
+- **Origem:** repositório `openbot` (CopilotKit), pinado no commit `06a1a84`,
+  espelhado em `estudo-migracao/openbot` durante a migração.
+- **Adaptações principais:** Bun → Node (`node:http`), sessão por
+  `runtimeId`/TaskRun em vez de perfil permanente por bot (spec §3/§32),
+  parser YAML do snapshot reimplementado sem a dependência `yaml` (subconjunto
+  do serializador do Playwright), egress com resolução de DNS antes do
+  veredito, comentários e mensagens em pt-BR.
+- **Licença:**
+
+```
+MIT License
+
+Copyright (c) 2026 CopilotKit
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## steel-browser — Apache-2.0
+
+O screencast do openbot (`agent-computer/src/screencast.ts`) declara derivar o
+loop de servidor do **steel-browser** (Apache-2.0). O screencast ainda NÃO foi
+portado para este repositório (pendência declarada da frente E8); a atribuição
+fica registrada desde já porque a linhagem acompanha o porte quando ele vier.
+
+## Chrome DevTools — BSD-3-Clause
+
+O mesmo screencast do openbot declara derivar o mapeamento de eventos de
+teclado do `InputModel.ts` do **Chrome DevTools** (BSD-3-Clause). Vale a mesma
+nota acima: entra com o porte do screencast.
+
+## Playwright — Apache-2.0
+
+`playwright@1.62.1` é dependência (não vendorizada) do `agent-computer` — o
+Chromium é baixado pelo instalador oficial do Playwright. Licença Apache-2.0,
+Microsoft Corporation.

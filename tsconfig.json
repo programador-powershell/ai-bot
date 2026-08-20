@@ -15,7 +15,10 @@
     { "path": "packages/domain/workspace" },
     { "path": "packages/plugins/cluster-scheduler" },
     { "path": "packages/plugins/context-runtime" },
+    { "path": "packages/plugins/browser-runtime" },
+    { "path": "packages/plugins/runtime-snapshots" },
     { "path": "worker-daemon" },
-    { "path": "server" }
+    { "path": "server" },
+    { "path": "agent-computer" }
   ]
 }
