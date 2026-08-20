@@ -1,0 +1,6 @@
+# Linker hoisted, de propósito: o isolated (padrão do Bun 1.4 em workspaces)
+# monta node_modules/.bun/<pacote>@<versão>/... e, somado ao caminho profundo
+# deste worktree no Windows, estoura MAX_PATH (ENAMETOOLONG em 4 pacotes do
+# fork — @babel/*, micromark/remark cjk). O hoisted instala plano e cabe.
+[install]
+linker = "hoisted"

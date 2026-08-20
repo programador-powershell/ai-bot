@@ -1,130 +1,356 @@
 /**
- * A configuração do processo, lida do AMBIENTE — a forma do config.go do
- * oráculo, e pelo mesmo motivo: o caso normal deste servidor é ser sidecar (o
- * host o executa com um bloco de variáveis e espera a porta abrir). Um arquivo
- * de configuração seria uma SEGUNDA fonte da verdade, editável com o app no ar
- * e capaz de discordar do que o host acabou de passar.
+ * What the runtime can do.
  *
- * Os padrões precisam ser suficientes: numa estação sem nenhuma variável,
- * carregar() devolve uma configuração que sobe. O que não pode ter padrão — o
- * token — é MATERIALIZADO no primeiro boot e lido do disco nos seguintes;
- * regerar invalidaria o token que o host já leu, então arquivo existente é
- * lido, nunca sobrescrito.
+ * [Cirurgia §4.6 — R3, sem SaaS] No openbot havia exatamente uma resposta:
+ * CopilotKit Intelligence obrigatório, e o boot ABORTAVA sem licença. Aqui a
+ * conversa é o NOSSO event log (local-first), então o modo é `local` e o boot
+ * não exige licença nem endpoint de Intelligence — sem degraded-mode fingido:
+ * o que este runtime diz que é, ele é. `durableHistory` nasce `false` e só
+ * vira `true` na onda 2, quando os channels passarem a ler/escrever o event
+ * log de verdade — anunciar antes seria mentira na /api/capabilities.
  */
+import { devAuthEnabled } from "./auth/dev-actor";
+import type { ActionPolicy } from "./computer/policy";
+import { parseActionPolicy } from "./computer/policy-store";
 
-import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+export type RuntimeCapabilities = {
+  mode: "local";
+  durableHistory: false;
+};
 
-/** Nomes das variáveis — exportados para instalador/host escreverem EXATAMENTE estas chaves. */
-export const ENV_BIND = 'AIBOT_BIND'
-export const ENV_DATA_DIR = 'AIBOT_DATA_DIR'
-export const ENV_TOKEN = 'AIBOT_TOKEN'
-export const ENV_ALLOW_ORIGINS = 'AIBOT_ALLOW_ORIGINS'
+export type DeploymentConfig = {
+  databaseUrl: string;
+  keyEncryptionKey: string;
+  managedAgentAgUiUrl: URL;
+  /**
+   * What this deployment calls itself, when more than one shares an Intelligence project.
+   *
+   * Absent, the tenant package's id stands in, which separates deployments running different
+   * packages but not a copy of one running alongside the original. See channels/thread-identity.ts.
+   */
+  deploymentId: string | undefined;
+  tenantPackageDirectory: string;
+  runtime: RuntimeCapabilities;
+  /**
+   * How long a Bot's stream may say nothing before this deployment ends the turn, in milliseconds.
+   *
+   * Zero means no watchdog, and an unset variable means zero. A turn that is ended is a turn
+   * somebody loses, so a deployment that has not said it wants that gets the behaviour it already
+   * had. `.env.example` ships a value, so a new clone starts with the watch on and an upgraded
+   * deployment does not acquire it without being asked.
+   */
+  agentStallTimeoutMs: number;
+  oauth: {
+    google?: { clientId: string; clientSecret: string };
+  };
+  auth?: {
+    baseUrl: string;
+    secret: string;
+    google: { clientId: string; clientSecret: string };
+    trustedOrigins: string[];
+    initialAdminEmails: string[];
+  };
+  /**
+   * Local development only: admit everybody as a fixed administrator instead of requiring sign-in.
+   * See auth/dev-actor.ts for the two locks that stop this reaching a deployment.
+   */
+  devNoAuth: boolean;
+  /**
+   * The Bot computer. Absent means the feature is off and its routes are not mounted, rather than
+   * mounted and failing: a capability that is not configured should be missing, not broken.
+   */
+  computer?: {
+    baseUrl: string;
+    /** The secret every computer requires of its caller. */
+    token?: string;
+    /**
+     * The container supervisor, when each Bot is to get a computer of its own. Absent means one
+     * shared computer at `baseUrl`, which is what a laptop wants and is honest about being one
+     * machine.
+     */
+    supervisor?: { baseUrl: string; token?: string };
+    /** True on a laptop, where browsing the deployment's own services is the point. */
+    allowPrivateHosts: boolean;
+    /**
+     * What Bots may do on their computers. Absent means the built-in default applies.
+     *
+     * A whole policy in one variable rather than a variable per rule, because the rules are an
+     * ordered pair of lists and splitting them across `AGENT_COMPUTER_DENY_1`-style names makes their
+     * precedence, which is the only subtle thing about them, impossible to see.
+     */
+    policy?: ActionPolicy;
+  };
+};
 
-/** Loopback de propósito: este processo executa ferramenta na máquina da pessoa. */
-export const BIND_PADRAO = '127.0.0.1:8799'
+type Environment = Record<string, string | undefined>;
 
-/** Bytes do token antes do base64 (256 bits — o mesmo tokenSize do oráculo). */
-const TAMANHO_DO_TOKEN = 32
-const ARQUIVO_DO_TOKEN = 'token'
+function required(environment: Environment, name: string): string {
+  const value = environment[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} must be configured`);
+  }
+  return value;
+}
+
+function optional(environment: Environment, name: string): string | undefined {
+  return environment[name]?.trim() || undefined;
+}
 
 /**
- * As três origens legítimas do app (a lista do oráculo): a janela do Tauri em
- * produção (os dois esquemas, conforme a plataforma) e o Vite em
- * desenvolvimento. Qualquer outra origem é navegador de terceiro falando com
- * um servidor que executa comando — e isso precisa ser escolha explícita.
+ * The key in `.env.example`, which every clone of this repository starts with.
+ *
+ * It is a valid key, which is the whole problem: it is the right length and the right encoding, so
+ * nothing about it fails a check. A deployment that never changed it encrypts its credential vault
+ * with a key printed in a public repository, and looks exactly like one that did.
  */
-export const ORIGENS_PADRAO: readonly string[] = [
-  'tauri://localhost',
-  'http://tauri.localhost',
-  'http://localhost:1421',
-]
+const PLACEHOLDER_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-export interface ConfigDoServidor {
-  dataDir: string
-  host: string
-  port: number
-  token: string
-  allowOrigins: readonly string[]
-}
+function keyEncryptionKey(environment: Environment): string {
+  const value = required(environment, "KEY_ENCRYPTION_KEY");
+  const decoded = Buffer.from(value, "base64");
 
-/** Config inválida é erro de subida, nunca padrão silencioso. */
-export class ConfigInvalidaError extends Error {
-  override name = 'ConfigInvalidaError'
-}
-
-/**
- * Lê o ambiente, cria o dataDir e materializa o token. `env` é parâmetro para
- * os testes não mexerem em process.env de verdade.
- */
-export function carregarConfig(env: NodeJS.ProcessEnv = process.env): ConfigDoServidor {
-  const dataDir = caminhoAbsoluto(
-    valorOu(env[ENV_DATA_DIR], join(homedir(), '.aibot2')),
-  )
-  mkdirSync(dataDir, { recursive: true })
-
-  const { host, port } = parseBind(valorOu(env[ENV_BIND], BIND_PADRAO))
-
-  let token = (env[ENV_TOKEN] ?? '').trim()
-  if (token === '') {
-    token = materializarSegredo(join(dataDir, ARQUIVO_DO_TOKEN), TAMANHO_DO_TOKEN)
+  if (decoded.byteLength !== 32 || decoded.toString("base64") !== value) {
+    throw new Error("KEY_ENCRYPTION_KEY must be a base64-encoded 32-byte key");
   }
 
-  const origensCruas = (env[ENV_ALLOW_ORIGINS] ?? '').trim()
-  const allowOrigins =
-    origensCruas === ''
-      ? ORIGENS_PADRAO
-      : origensCruas
-          .split(',')
-          .map((origem) => origem.trim())
-          .filter((origem) => origem !== '')
-
-  return { dataDir, host, port, token, allowOrigins }
-}
-
-/** `host:porta` → partes validadas. IPv6 fica para quando alguém precisar — barulhento, não errado. */
-export function parseBind(bind: string): { host: string; port: number } {
-  const separador = bind.lastIndexOf(':')
-  if (separador <= 0 || separador === bind.length - 1) {
-    throw new ConfigInvalidaError(`${ENV_BIND} precisa ser host:porta — veio ${JSON.stringify(bind)}`)
-  }
-  const host = bind.slice(0, separador)
-  const port = Number(bind.slice(separador + 1))
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new ConfigInvalidaError(`porta inválida em ${ENV_BIND}: ${JSON.stringify(bind)}`)
-  }
-  return { host, port }
-}
-
-/**
- * Devolve o segredo em base64: lê o arquivo se ele existir, sorteia e grava se
- * não existir. Arquivo existente é lido, NUNCA sobrescrito — regerar
- * invalidaria o token que o host já leu.
- */
-export function materializarSegredo(caminho: string, bytes: number): string {
-  if (existsSync(caminho)) {
-    const existente = readFileSync(caminho, 'utf8').trim()
-    if (existente === '') {
-      throw new ConfigInvalidaError(
-        `arquivo de segredo vazio: ${caminho} — apague-o para gerar outro, ou preencha-o`,
-      )
+  /**
+   * Refused in production, warned everywhere else. The placeholder is convenient locally and public
+   * in any deployment.
+   */
+  if (value === PLACEHOLDER_KEY) {
+    if (environment.NODE_ENV === "production") {
+      throw new Error(
+        "KEY_ENCRYPTION_KEY is still the example key from .env.example, which is public. Generate one with: openssl rand -base64 32",
+      );
     }
-    return existente
+    console.warn(
+      "KEY_ENCRYPTION_KEY is the example key from .env.example, which is public. Fine locally. Generate a real one before deploying: openssl rand -base64 32",
+    );
   }
-  const segredo = randomBytes(bytes).toString('base64')
-  // flag wx: se alguém criou o arquivo entre o exists e o write, falha em vez
-  // de sobrescrever o segredo do outro processo.
-  writeFileSync(caminho, segredo + '\n', { encoding: 'utf8', flag: 'wx' })
-  return segredo
+
+  return value;
 }
 
-function valorOu(valor: string | undefined, padrao: string): string {
-  const limpo = (valor ?? '').trim()
-  return limpo === '' ? padrao : limpo
+function url(environment: Environment, name: string): string | undefined {
+  const value = optional(environment, name);
+  if (!value) {
+    return undefined;
+  }
+
+  try {
+    new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid URL`);
+  }
+  return value;
 }
 
-function caminhoAbsoluto(caminho: string): string {
-  return isAbsolute(caminho) ? caminho : resolve(caminho)
+function requiredHttpUrl(environment: Environment, name: string): URL {
+  const value = required(environment, name);
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${name} must be a valid HTTP(S) URL`);
+  }
+
+  return parsed;
+}
+
+function oauthClient(
+  environment: Environment,
+  provider: "GOOGLE",
+): { clientId: string; clientSecret: string } | undefined {
+  const clientId = optional(environment, `${provider}_OAUTH_CLIENT_ID`);
+  const clientSecret = optional(environment, `${provider}_OAUTH_CLIENT_SECRET`);
+
+  // Both or neither. One alone is a half-configured sign-in that fails at the first attempt rather
+  // than at start-up, which is the worst moment to discover it.
+  if (Boolean(clientId) !== Boolean(clientSecret)) {
+    throw new Error(
+      "Google OAuth configuration requires both client ID and client secret",
+    );
+  }
+
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined;
+}
+
+function commaSeparated(environment: Environment, name: string): string[] {
+  return (optional(environment, name) ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function authConfig(
+  environment: Environment,
+  google: { clientId: string; clientSecret: string } | undefined,
+): DeploymentConfig["auth"] {
+  const secret = optional(environment, "BETTER_AUTH_SECRET");
+  const baseUrl = url(environment, "BETTER_AUTH_URL");
+  if (!google) {
+    if (secret || baseUrl) {
+      throw new Error(
+        "Google authentication requires GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET",
+      );
+    }
+    return undefined;
+  }
+  if (!secret) {
+    throw new Error("Google authentication requires BETTER_AUTH_SECRET");
+  }
+  if (secret.length < 32) {
+    throw new Error("BETTER_AUTH_SECRET must be at least 32 characters");
+  }
+  if (!baseUrl) {
+    throw new Error("Google authentication requires BETTER_AUTH_URL");
+  }
+
+  return {
+    baseUrl,
+    secret,
+    google,
+    trustedOrigins: commaSeparated(environment, "TRUSTED_ORIGINS").length
+      ? commaSeparated(environment, "TRUSTED_ORIGINS")
+      : ["http://localhost:3000"],
+    initialAdminEmails: commaSeparated(environment, "INITIAL_ADMIN_EMAILS"),
+  };
+}
+
+/**
+ * [Cirurgia §4.6] O que era `runtimeCapabilities` do Intelligence virou a
+ * declaração honesta do modo local. Se alguém configurar as variáveis
+ * INTELLIGENCE_* neste deployment, isso é um engano a dizer em voz alta, não a
+ * ignorar: configuração que o produto não honra não pode passar calada (a
+ * mesma régua que o resto deste arquivo aplica a política e watchdog).
+ */
+function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
+  const leftovers = [
+    "INTELLIGENCE_API_URL",
+    "INTELLIGENCE_GATEWAY_WS_URL",
+    "INTELLIGENCE_API_KEY",
+    "COPILOTKIT_LICENSE_TOKEN",
+  ].filter((name) => optional(environment, name));
+  if (leftovers.length > 0) {
+    throw new Error(
+      `Este deployment roda em modo local (R3): CopilotKit Intelligence não é montado. Remova: ${leftovers.join(", ")}`,
+    );
+  }
+
+  return { mode: "local", durableHistory: false };
+}
+
+function computerConfig(
+  environment: Environment,
+): DeploymentConfig["computer"] {
+  const baseUrl = url(environment, "AGENT_COMPUTER_URL");
+  if (!baseUrl) {
+    return undefined;
+  }
+  const policy = actionPolicy(environment);
+  /*
+   * The secret the computers require. Without it every call to a computer is refused, and that is the
+   * intended failure: `agent-computer` drives a browser holding real logins and must not answer
+   * unauthenticated callers that can reach its port.
+   */
+  const computerToken = optional(environment, "COMPUTER_TOKEN");
+  const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
+  const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+  return {
+    baseUrl,
+    allowPrivateHosts:
+      optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
+    ...(policy ? { policy } : {}),
+    ...(computerToken ? { token: computerToken } : {}),
+    ...(supervisorUrl
+      ? {
+          supervisor: {
+            baseUrl: supervisorUrl,
+            ...(supervisorToken ? { token: supervisorToken } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * The action policy, as JSON in one variable.
+ *
+ * Refuses to start on malformed JSON or a policy of the wrong shape, rather than falling back to the
+ * default. An operator who wrote a rule and mistyped it would otherwise get a running deployment that
+ * silently permits what they had just tried to forbid, and no indication that anything was wrong.
+ * Configuration the product cannot honour belongs at the boot boundary; see the note at the top.
+ */
+function actionPolicy(environment: Environment): ActionPolicy | undefined {
+  const raw = optional(environment, "AGENT_COMPUTER_POLICY");
+  if (!raw) {
+    return undefined;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("AGENT_COMPUTER_POLICY must be valid JSON");
+  }
+
+  const result = parseActionPolicy(parsed);
+  if (!result.ok) {
+    throw new Error(`AGENT_COMPUTER_POLICY is invalid: ${result.error}`);
+  }
+  return result.policy;
+}
+
+/**
+ * How long silence on a Bot's stream is allowed to last.
+ *
+ * Refuses to start on anything that is not a whole number of milliseconds, rather than falling back
+ * to the default. Same reasoning as the action policy above it: an operator who meant to write a
+ * two-minute timeout and typed something else would otherwise get a running deployment with a
+ * silently different boundary, and no indication that anything was wrong.
+ *
+ * Zero is a legitimate value and means off. It is not the same as a malformed one.
+ */
+function agentStallTimeoutMs(environment: Environment): number {
+  const raw = optional(environment, "AGENT_STALL_TIMEOUT_MS");
+  if (!raw) {
+    return 0;
+  }
+
+  const milliseconds = Number(raw);
+  if (!Number.isInteger(milliseconds) || milliseconds < 0) {
+    throw new Error(
+      "AGENT_STALL_TIMEOUT_MS must be a whole number of milliseconds, or 0 to switch the watchdog off",
+    );
+  }
+  return milliseconds;
+}
+
+export function loadConfig(
+  environment: Environment = process.env,
+): DeploymentConfig {
+  const google = oauthClient(environment, "GOOGLE");
+
+  return {
+    databaseUrl: required(environment, "DATABASE_URL"),
+    keyEncryptionKey: keyEncryptionKey(environment),
+    managedAgentAgUiUrl: requiredHttpUrl(
+      environment,
+      "MANAGED_AGENT_AG_UI_URL",
+    ),
+    deploymentId: optional(environment, "DEPLOYMENT_ID"),
+    tenantPackageDirectory:
+      optional(environment, "TENANT_PACKAGE_DIR") ?? "../examples/fintech",
+    runtime: runtimeCapabilities(environment),
+    agentStallTimeoutMs: agentStallTimeoutMs(environment),
+    oauth: { google },
+    auth: authConfig(environment, google),
+    devNoAuth: devAuthEnabled(environment),
+    computer: computerConfig(environment),
+  };
 }

@@ -8,6 +8,7 @@
   },
   "packageManager": "bun@1.4.0",
   "workspaces": [
+    "app",
     "server",
     "worker-daemon",
     "agent-computer",
@@ -21,8 +22,11 @@
     "playwright"
   ],
   "scripts": {
-    "test": "bun x vitest run",
-    "typecheck": "bun x tsc --build"
+    "test": "bun x vitest run && bun x --bun vitest run --config vitest.chassis.config.ts",
+    "test:nucleo": "bun x vitest run",
+    "test:chassis": "bun x --bun vitest run --config vitest.chassis.config.ts",
+    "typecheck": "bun x tsc --build",
+    "generate:app-config": "bun scripts/generate-app-config.ts"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

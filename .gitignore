@@ -1,3 +1,9 @@
 node_modules/
 dist/
 *.tsbuildinfo
+# Banco do chassis (bun:sqlite) criado no boot — dado local, nunca versionado
+chassis.db
+chassis.db-wal
+chassis.db-shm
+# Emissao de declaracoes do projeto composite do app
+dist-types/

@@ -19,6 +19,7 @@
     { "path": "packages/plugins/runtime-snapshots" },
     { "path": "worker-daemon" },
     { "path": "server" },
-    { "path": "agent-computer" }
+    { "path": "agent-computer" },
+    { "path": "app" }
   ]
 }

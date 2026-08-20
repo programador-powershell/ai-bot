@@ -1,11 +1,20 @@
 {
-  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
+    "composite": true,
+    "target": "ES2024",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2024"],
+    "types": ["bun"],
+    "strict": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "rootDir": "."
   },
-  "include": ["src"],
+  "include": ["src", "drizzle.config.ts"],
   "references": [
     { "path": "../packages/harness-kernel" },
     { "path": "../packages/domain/events" },
