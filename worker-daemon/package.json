@@ -1,0 +1,20 @@
+{
+  "name": "@aibot2/worker-daemon",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O daemon do PC físico sobre node:http: os 9 verbos da spec §36 (health/capabilities/acquire/prepare/materialize/start/cancel/publish/result/renew), token compartilhado do enrolamento, executor local em processo atrás do seam ContainerRuntime (Docker/dockerode AGUARDA TI/SI e entra pela MESMA interface). O daemon EXECUTA e reporta eventos — NUNCA grava seq (o sequenciador é do server) e NUNCA expõe Docker passthrough. Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-runtime": "workspace:*",
+    "@aibot2/domain-workers": "workspace:*",
+    "@aibot2/domain-workspace": "workspace:*"
+  }
+}

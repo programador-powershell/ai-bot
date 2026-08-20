@@ -1,0 +1,15 @@
+{
+  "name": "@aibot2/domain-goals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O Goal como entidade do control plane: o pedido do usuário que é dono das conversas-filhas e a RESIDÊNCIA dos tetos da equipe (3/4/24, D6 do m0-inventario) — o orçamento vive por Goal em store durável, nunca em contexto de processo. Zero dependências de runtime.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

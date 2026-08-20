@@ -1,0 +1,24 @@
+{
+  "name": "@aibot2/cluster-scheduler",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O scheduler do cluster: a ordem de decisão da spec §28 (requirements → runtime → cpu/ram/gpu → capacidade → browser/devices → localidade de snapshot → carga → política) e o motor de ondas portado do crew.go — tetos duráveis por Goal, recusa-como-falha, escalação, retry debitando só unfinished e a cerca de promoção no caminho. A Needle declara requisitos; o scheduler escolhe a máquina, nunca o contrário. Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*",
+    "@aibot2/domain-goals": "workspace:*",
+    "@aibot2/domain-runtime": "workspace:*",
+    "@aibot2/domain-tasks": "workspace:*",
+    "@aibot2/domain-workers": "workspace:*",
+    "@aibot2/domain-workspace": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*"
+  }
+}

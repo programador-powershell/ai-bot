@@ -1,0 +1,15 @@
+{
+  "name": "@aibot2/domain-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O runtime da TAREFA (não da sessão): RuntimeRequirements que a Needle declara e o control plane interpreta, e o fingerprint de snapshot em duas camadas (base + hash de LOCKS) — descartável, sem segredos, nunca fonte de verdade. Zero dependências de runtime.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

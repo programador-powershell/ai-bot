@@ -20,6 +20,27 @@ importers:
 
   packages/domain/events: {}
 
+  packages/domain/goals: {}
+
+  packages/domain/runtime: {}
+
+  packages/domain/tasks:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../events
+      '@aibot2/domain-goals':
+        specifier: workspace:*
+        version: link:../goals
+
+  packages/domain/workers:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../events
+
+  packages/domain/workspace: {}
+
   packages/harness-kernel: {}
 
   packages/harness-openbot-bridge:
@@ -39,6 +60,46 @@ importers:
       '@aibot2/harness-kernel':
         specifier: workspace:*
         version: link:../../harness-kernel
+
+  packages/plugins/cluster-scheduler:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../../domain/events
+      '@aibot2/domain-goals':
+        specifier: workspace:*
+        version: link:../../domain/goals
+      '@aibot2/domain-runtime':
+        specifier: workspace:*
+        version: link:../../domain/runtime
+      '@aibot2/domain-tasks':
+        specifier: workspace:*
+        version: link:../../domain/tasks
+      '@aibot2/domain-workers':
+        specifier: workspace:*
+        version: link:../../domain/workers
+      '@aibot2/domain-workspace':
+        specifier: workspace:*
+        version: link:../../domain/workspace
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../../harness-kernel
+
+  packages/plugins/context-runtime:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../../domain/events
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../../harness-kernel
+      '@aibot2/plugin-action-gateway':
+        specifier: workspace:*
+        version: link:../action-gateway
+    devDependencies:
+      '@aibot2/specialist-registry':
+        specifier: workspace:*
+        version: link:../specialist-registry
 
   packages/plugins/needle-orchestrator:
     dependencies:
@@ -79,6 +140,18 @@ importers:
       '@aibot2/harness-openbot-bridge':
         specifier: workspace:*
         version: link:../packages/harness-openbot-bridge
+
+  worker-daemon:
+    dependencies:
+      '@aibot2/domain-runtime':
+        specifier: workspace:*
+        version: link:../packages/domain/runtime
+      '@aibot2/domain-workers':
+        specifier: workspace:*
+        version: link:../packages/domain/workers
+      '@aibot2/domain-workspace':
+        specifier: workspace:*
+        version: link:../packages/domain/workspace
 
 packages:
 

@@ -1,0 +1,15 @@
+{
+  "name": "@aibot2/domain-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WorkspacePlan IMUTÁVEL por TaskRun (spec §21: source/runtime/staging/baseline, sem caminho físico no plano persistente), WorkspaceExecution local ao worker e o PROMOTE com cerca worker+época (porte de internal/workspace do oráculo Go) — stale epoch nunca promove; worker só STAGING, quem promove é o control plane. Zero dependências de runtime.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

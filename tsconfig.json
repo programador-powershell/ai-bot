@@ -8,6 +8,14 @@
     { "path": "packages/plugins/specialist-registry" },
     { "path": "packages/plugins/needle-orchestrator" },
     { "path": "packages/providers/needle" },
+    { "path": "packages/domain/goals" },
+    { "path": "packages/domain/runtime" },
+    { "path": "packages/domain/tasks" },
+    { "path": "packages/domain/workers" },
+    { "path": "packages/domain/workspace" },
+    { "path": "packages/plugins/cluster-scheduler" },
+    { "path": "packages/plugins/context-runtime" },
+    { "path": "worker-daemon" },
     { "path": "server" }
   ]
 }

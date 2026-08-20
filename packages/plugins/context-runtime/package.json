@@ -1,0 +1,23 @@
+{
+  "name": "@aibot2/plugin-context-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O Context Runtime do AI-BOT 2: a Cápsula de Estado (dobra determinística com validação em duas passadas), o Context Assembler (working set com grupos atômicos e fit ladder), o Budget Manager (gatilhos de compactação), checkpoint/recovery durável e o Agent Loop plugável (ctx.agentLoop) — tudo como Services do harness-kernel. Zero dependências de runtime externas (m1-plano §5 E6).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*",
+    "@aibot2/plugin-action-gateway": "workspace:*"
+  },
+  "devDependencies": {
+    "@aibot2/specialist-registry": "workspace:*"
+  }
+}

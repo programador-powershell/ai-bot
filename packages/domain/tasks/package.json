@@ -1,0 +1,19 @@
+{
+  "name": "@aibot2/domain-tasks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Goal→Task→TaskRun do control plane: TaskRunID lógico com tentativa (nunca o nome da máquina), estados persistidos via StorageDriver, DAG determinístico com ondas/caminho crítico/detecção de ciclo (porte de dag.go), readiness dinâmica por inputs reais, a heurística refusal() do crew.go e o orçamento durável por Goal. Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*",
+    "@aibot2/domain-goals": "workspace:*"
+  }
+}

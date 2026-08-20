@@ -1,0 +1,18 @@
+{
+  "name": "@aibot2/domain-workers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Worker = PC físico: registro com capacidades, heartbeat com prazo e o LEASE com ÉPOCA e TTL (porte de internal/fleet do oráculo Go) — renovar mantém a época, vencido/vago bumpa, alheio válido recusa; worker morto → lease vence → TaskRun volta à fila. Zero dependências de runtime (node: builtins apenas).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*"
+  }
+}
