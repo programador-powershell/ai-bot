@@ -1,0 +1,9 @@
+packages:
+  - server
+  - shared
+  - worker-daemon
+  - packages/harness-kernel
+  - packages/harness-openbot-bridge
+  - packages/domain/*
+  - packages/plugins/*
+  - packages/providers/*

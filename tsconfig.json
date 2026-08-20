@@ -1,0 +1,7 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/harness-kernel" },
+    { "path": "packages/domain/events" }
+  ]
+}

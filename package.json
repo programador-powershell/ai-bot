@@ -1,0 +1,17 @@
+{
+  "name": "aibot2",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-BOT 2 — OpenBot como chassis, kernel plugável clean-room, Needle Pro orquestradora e control plane distribuído, tudo em TypeScript",
+  "engines": { "node": ">=24" },
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

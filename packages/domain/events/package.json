@@ -1,0 +1,15 @@
+{
+  "name": "@aibot2/domain-events",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Event log do AI-BOT 2: envelope canônico (forma do protocol.go do oráculo), seq contínuo por sessão, durabilidade por kind e o StorageDriver com implementação node:sqlite. Zero dependências de runtime (m0-inventario R2/R3).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

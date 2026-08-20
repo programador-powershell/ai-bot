@@ -1,0 +1,15 @@
+{
+  "name": "@aibot2/harness-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kernel de plugins clean-room do AI-BOT 2: Context, plugin em 3 formas, Service, eventos tipados (5 modos) e efeitos reversíveis. Zero dependências de runtime por decisão (m1-plano §2).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}
