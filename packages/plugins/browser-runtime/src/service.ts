@@ -26,6 +26,7 @@ import { parseRequirements } from '@aibot2/domain-runtime'
 import {
   AgentComputerClient,
   type BrowserAction,
+  type BrowserControlState,
   type BrowserSnapshot,
   type FetchLike,
 } from './client.js'
@@ -67,6 +68,17 @@ export interface BrowserLease {
   navigate(url: string): Promise<{ url: string; title: string }>
   snapshot(): Promise<BrowserSnapshot>
   act(action: BrowserAction): Promise<Record<string, unknown>>
+  /**
+   * O VOLANTE da execução (Take the Wheel), preso ao runtimeId do lease — não a
+   * um bot. `control()` LÊ o estado (o que a UI forkada mostra como cartão);
+   * take/release/request dirigem o handover. Enquanto o humano segura, `act`
+   * acima RECUSA com humanHasControl (nunca enfileira) — a semântica do
+   * control.ts do agent-computer chega à tela por aqui.
+   */
+  control(): Promise<BrowserControlState>
+  requestControl(reason: string): Promise<BrowserControlState>
+  takeControl(): Promise<BrowserControlState>
+  releaseControl(): Promise<BrowserControlState>
   close(): Promise<void>
 }
 
@@ -131,6 +143,10 @@ export class BrowserRuntimeService extends Service {
       navigate: (url) => client.navigate(runtimeId, url),
       snapshot: () => client.snapshot(runtimeId),
       act: (action) => client.act(runtimeId, action),
+      control: () => client.control(runtimeId),
+      requestControl: (reason) => client.requestControl(runtimeId, reason),
+      takeControl: () => client.takeControl(runtimeId),
+      releaseControl: () => client.releaseControl(runtimeId),
       close,
     }
   }

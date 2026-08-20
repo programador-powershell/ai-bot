@@ -61,6 +61,16 @@ export type WatchedStream = {
   id: string;
   /** The Bot on the far end, so a stall names what went quiet rather than which socket it was. */
   botId: string;
+  /**
+   * [Onda 4 — cirurgia §3] A TaskRun que esta corrente serve, quando há uma.
+   *
+   * O openbot vigiava por bot (o único nível que ele conhecia). Aqui uma parada
+   * é de uma EXECUÇÃO (run-<task>-a<n>): é o taskRunId que o scheduler despachou,
+   * não o computador permanente de um bot. Opcional porque nem toda corrente
+   * vigiada nasce de um despacho (o chat direto ainda existe) — mas quando nasce,
+   * o stall dispara POR TaskRun, e é o taskRunId que a linha de auditoria conta.
+   */
+  taskRunId?: string;
 };
 
 export type StalledStream = WatchedStream & {
@@ -216,6 +226,9 @@ export class TurnWatchdog {
         this.onStall({
           id,
           botId: stream.botId,
+          // O taskRunId viaja para a callback quando a corrente nasceu de um
+          // despacho — é o que faz o stall ser POR TaskRun, não só por bot.
+          ...(stream.taskRunId !== undefined ? { taskRunId: stream.taskRunId } : {}),
           silentForMs,
           chunks: stream.chunks,
         });

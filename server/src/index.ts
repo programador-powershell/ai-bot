@@ -28,7 +28,6 @@ import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
 import { createRoleRepository } from "./auth/guards";
-import type { OpenBotRole } from "./auth/roles";
 import {
   createChannelEventHub,
   createInProcessAnnouncer,
@@ -38,13 +37,11 @@ import { createThreadIdentity } from "./channels/thread-identity";
 import { websocket as channelSocket } from "./channels/socket";
 import { createSandboxedStore } from "./components/sandboxed";
 import { createComponentStore } from "./components/store";
-import { createComputerClient } from "./computer/client";
-import { createComputerGateway } from "./computer/gateway";
+import { createExecutionComputerGateway } from "./computer/execution-gateway";
 import {
   createPolicyStore,
   DEFAULT_ACTION_POLICY,
 } from "./computer/policy-store";
-import { createSupervisorClient } from "./computer/supervisor";
 import { loadConfig } from "./config";
 import { createConnectorAdminService } from "./connectors";
 import {
@@ -62,42 +59,10 @@ import {
   synchronizeTenantPackage,
 } from "./tenant-package";
 
-/**
- * Who is asking, for an authenticated upgrade (o proxy do live screen).
- *
- * One resolver, because a run has two questions to answer about the same person: whose threads and
- * memory these are, and which coworkers they may run. Answering them from different places is how
- * one person ends up running another's private coworker, or reading their thread.
- */
-async function resolveRequestActor(request: Request): Promise<{
-  id: string;
-  name: string;
-  role: OpenBotRole;
-}> {
-  if (config.devNoAuth) {
-    return { id: DEV_ACTOR.id, name: DEV_ACTOR.email, role: DEV_ACTOR.role };
-  }
-  const session = await auth?.api.getSession({ headers: request.headers });
-  const user = session?.user;
-  if (!user) {
-    throw new Error("This request requires a signed-in user.");
-  }
-  const roles = await roleRepository.rolesForUser(user.id);
-  if (!roles.includes("admin") && !roles.includes("user")) {
-    throw new Error("This request requires an authorized user.");
-  }
-  return {
-    id: user.id,
-    name: user.name ?? user.email ?? user.id,
-    role: roles.includes("admin") ? "admin" : "user",
-  };
-}
-
-/** A projeção usada pelo guard manual do upgrade (middleware não roda em upgrade). */
-const identifyUser = async (request: Request) => {
-  const { id, name } = await resolveRequestActor(request);
-  return { id, name };
-};
+// [Onda 4] resolveRequestActor/identifyUser (o guard manual do upgrade do
+// live-screen) saíram com o proxy per-bot: não há mais upgrade autenticado por
+// bot neste processo. O upgrade da conversa (/v1/stream) autentica pelo hello
+// (token no primeiro frame), não por sessão HTTP.
 
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
@@ -158,21 +123,11 @@ const componentStore = createComponentStore(database);
 const roleRepository = createRoleRepository(database);
 await synchronizeTenantPackage(database, tenantPackage);
 const auth = config.auth ? createAuth(config, database) : undefined;
-// One computer each, when a supervisor is configured to give them out. Without one every Bot shares
-// the computer at `baseUrl`, which is what a laptop wants and is honest about being one machine.
-const supervisor = config.computer?.supervisor
-  ? createSupervisorClient(config.computer.supervisor)
-  : undefined;
-const computerClient = config.computer
-  ? createComputerClient({
-      baseUrl: config.computer.baseUrl,
-      allowPrivateHosts: config.computer.allowPrivateHosts,
-      ...(config.computer.token ? { token: config.computer.token } : {}),
-      ...(supervisor
-        ? { resolveBaseUrl: (botId: string) => supervisor.locate(botId) }
-        : {}),
-    })
-  : undefined;
+// [Onda 4 — cirurgia §3] Não há mais supervisor nem ComputerClient per-bot: o
+// navegador é TASK-SCOPED e nasce no despacho da execução, falando com o NOSSO
+// agent-computer via ctx.browser (montado no núcleo abaixo). Quem provisiona
+// compute é o control plane, não o server — o acoplamento botId→container
+// permanente saiu daqui.
 // What Bots may do on their computers. Configuration supplies the deployment's default; an
 // administrator can change it while running, and a restart returns to the configured one.
 const policyStore = createPolicyStore(
@@ -231,35 +186,27 @@ void recordAuditEvent(bootAuditStore, {
 }).catch(() => undefined);
 
 /*
- * Record whether each Bot has a computer of its own.
+ * [Onda 4 — cirurgia §3] O isolamento agora é TASK-SCOPED, dito no boot.
  *
- * Without a supervisor every Bot shares the browser at `AGENT_COMPUTER_URL`. That is a fine way to
- * run on a laptop, but the shared isolation state must be visible rather than inferred.
+ * O openbot registrava aqui "um computador por bot" vs "um compartilhado" (a
+ * presença/ausência do supervisor). Não existe mais nenhum dos dois: o navegador
+ * nasce por EXECUÇÃO (taskRunId/runtimeId) e morre com ela — bot ocioso consome
+ * zero navegadores. A trilha diz isso onde não dá para discutir depois.
  */
 void recordAuditEvent(bootAuditStore, {
   eventType: "computer.isolation_loaded",
   targetType: "computer",
-  payload: supervisor
-    ? {
-        isolation: "one computer per Bot",
-        note: "Each Bot gets its own container, its own /workspace and its own browser profile.",
-      }
-    : {
-        isolation: "one shared computer",
-        note: "No supervisor is configured, so every Bot uses the same browser. Sessions, files and logins are shared between them. Set COMPUTER_SUPERVISOR_URL to give each Bot its own.",
-      },
+  payload: {
+    isolation: "task-scoped",
+    note: "O navegador é da EXECUÇÃO, não do bot: nasce no open do despacho (requirements.browser=true) e morre no close. Nenhum perfil permanente por bot.",
+  },
 }).catch(() => undefined);
 
 console.info(
   JSON.stringify({
     type: "computer-isolation",
-    isolation: supervisor ? "one computer per Bot" : "one shared computer",
-    ...(supervisor
-      ? {}
-      : {
-          warning:
-            "Every Bot shares one browser. Set COMPUTER_SUPERVISOR_URL for a computer each.",
-        }),
+    isolation: "task-scoped",
+    note: "Um navegador por execução (spec §32). Sem computador permanente por bot.",
   }),
 );
 /*
@@ -300,6 +247,21 @@ const funil = criarFunilDoChassi({
   conversa,
   pluginStore,
 });
+
+/*
+ * [Onda 4 — cirurgia §3] O gateway task-scoped do navegador, sobre o seam
+ * ctx.browser que o núcleo montou. Só existe quando esta estação TEM
+ * agent-computer configurado (config.computer) — sem ele, o browser-runtime não
+ * subiu e não há o que governar. A política é a MESMA do Gate, lida a cada
+ * decisão (regra de admin vale já na próxima ação, não só após reiniciar).
+ */
+const executionGateway = config.computer
+  ? createExecutionComputerGateway({
+      browser: nucleo.ctx.browser,
+      auditStore: bootAuditStore,
+      policy: () => policyStore.get(),
+    })
+  : undefined;
 
 /*
  * [Onda 3] As aprovações que ficaram pendentes quando o processo anterior
@@ -432,19 +394,11 @@ const app = createApp(
   // O runtime do Intelligence NÃO é montado (§4.6): o chat do app fica atrás
   // de flag até a onda 2 religá-lo no nosso protocolo WS.
   undefined,
-  computerClient,
-  // The only path to an acting call.
-  computerClient
-    ? createComputerGateway({
-        client: computerClient,
-        auditStore: bootAuditStore,
-        // Read on every decision rather than captured once, so a rule an administrator adds while the
-        // server is running applies to the very next action instead of after a restart.
-        policy: () => policyStore.get(),
-        // Stop, reset and the listing act on containers when there are containers to act on.
-        ...(supervisor ? { supervisor } : {}),
-      })
-    : undefined,
+  // [Onda 4] Slot aposentado do ComputerClient per-bot (ver createApp).
+  undefined,
+  // [Onda 4] O gateway task-scoped sobre ctx.browser — o único caminho de ação
+  // no navegador, com decisão de política e linha de auditoria antes do efeito.
+  executionGateway,
   policyStore,
   // Bots as durable objects, and the channels they run in.
   agentProfileStore,
@@ -477,48 +431,23 @@ const app = createApp(
 );
 
 /**
- * The live screen, proxied.
+ * [Onda 4 — cirurgia §3/§4.7] O proxy do live-screen per-bot SAIU.
  *
- * Proxied rather than connected directly. `agent-computer` authenticates its callers with a
- * shared token, not with a person's session, and it must never be reachable from a browser. So the
- * socket terminates here, behind the same session guard as every other route, and this process opens
- * a second socket inward carrying the token.
+ * O openbot terminava aqui um WS `/api/computers/:botId/stream` e discava para
+ * dentro do agent-computer (screencast do computador permanente daquele bot).
+ * Não existe mais: o navegador é task-scoped (nasce/morre com a execução) e o
+ * NOSSO agent-computer não expõe screencast nesta leva — pendência declarada
+ * (onda 7, atrás do session guard). A PRESENÇA da UI passa a ser alimentada pelo
+ * estado observável da execução (runtime-snapshots), não por um Chromium
+ * permanente por bot. Com isso, o botId sai também do transporte.
  *
- * Not a Hono route because an upgrade is not a request/response: Bun hands it over before Hono sees a
- * body, so it is handled in `fetch` ahead of the app.
- */
-const toStreamUrl = (baseUrl: string, botId: string) =>
-  // The Bot travels in the query, because a websocket upgrade carries no custom header for the
-  // computer to read and every call it serves is per Bot. The secret travels the same way and for the
-  // same reason, this socket is the one a person can type into, so it is the last thing that should
-  // be reachable without it.
-  `${baseUrl.replace(/^http/, "ws").replace(/\/$/, "")}/stream?bot=${encodeURIComponent(botId)}&token=${encodeURIComponent(config.computer?.token ?? "")}`;
-
-/**
- * Which Bot's screen. The Bot is named in the path and its computer is located the same way every
- * other call locates it, so the live stream cannot point at a different Bot's browser.
- */
-const streamPathBotId = (pathname: string): string | null => {
-  const match = pathname.match(/^\/api\/computers\/([^/]+)\/stream$/);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-};
-
-/** What each proxied socket carries: where to connect inward, and the socket once opened. */
-type StreamData = { upstream: string; inward?: WebSocket };
-
-/**
- * Bun takes exactly one WebSocket handler for the server, and THREE features need one: the app
- * proxies the computer stream, it pushes channel activity through Hono's adapter, and [Onda 2] o
- * transporte da CONVERSA (hello/ready/replay em /v1/stream) fala pelo WS nativo. So this one
- * dispatches on what the upgrade attached — a proxy socket carries `upstream`, o nosso stream
- * carrega o marcador `streamDoChassi`, a Hono socket carries neither — rather than any feature
- * quietly taking the slot and breaking the others on connect.
+ * Bun aceita UM handler de WebSocket, e agora restam DOIS donos do slot: [Onda 2]
+ * o transporte da CONVERSA (hello/ready/replay em /v1/stream, WS nativo, marcado
+ * com streamDoChassi) e os channels via adapter do Hono. O dispatch é por quem o
+ * upgrade marcou — nunca por uma feature tomando o slot calada.
  */
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
-type SocketData = StreamData | DadosDoStreamDoChassi | ChannelSocket["data"];
-
-const isProxiedStream = (data: SocketData): data is StreamData =>
-  typeof (data as StreamData).upstream === "string";
+type SocketData = DadosDoStreamDoChassi | ChannelSocket["data"];
 
 // Hono owns the socket's data once it has upgraded it; this hands its own back to it.
 const asChannelSocket = (ws: { data: SocketData }) =>
@@ -537,23 +466,7 @@ serve<SocketData>({
         streamDoChassi.aoAbrir(ws as Parameters<typeof streamDoChassi.aoAbrir>[0]);
         return;
       }
-      if (!isProxiedStream(ws.data)) {
-        channelSocket.open(asChannelSocket(ws));
-        return;
-      }
-      const inward = new WebSocket(ws.data.upstream);
-      ws.data.inward = inward;
-      // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
-      // should be dropped, not queued, because a stale frame is worse than a missing one.
-      inward.onmessage = (event) => {
-        try {
-          ws.send(String(event.data));
-        } catch {
-          inward.close();
-        }
-      };
-      inward.onclose = () => ws.close();
-      inward.onerror = () => ws.close();
+      channelSocket.open(asChannelSocket(ws));
     },
     message(ws, raw) {
       if (ehStreamDoChassi(ws.data)) {
@@ -563,11 +476,7 @@ serve<SocketData>({
         );
         return;
       }
-      if (!isProxiedStream(ws.data)) {
-        channelSocket.message(asChannelSocket(ws), raw);
-        return;
-      }
-      if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+      channelSocket.message(asChannelSocket(ws), raw);
     },
     close(ws, code, reason) {
       if (ehStreamDoChassi(ws.data)) {
@@ -578,11 +487,7 @@ serve<SocketData>({
         );
         return;
       }
-      if (!isProxiedStream(ws.data)) {
-        channelSocket.close(asChannelSocket(ws), code, reason);
-        return;
-      }
-      ws.data.inward?.close();
+      channelSocket.close(asChannelSocket(ws), code, reason);
     },
     drain(ws) {
       // Só o nosso stream escreve com contrapressão consciente; os outros
@@ -613,44 +518,9 @@ serve<SocketData>({
       return respostaDoTransporte;
     }
 
-    const streamBotId = streamPathBotId(url.pathname);
-    if (
-      streamBotId !== null &&
-      request.headers.get("upgrade")?.toLowerCase() === "websocket"
-    ) {
-      if (!config.computer) {
-        return new Response("No computer is configured.", { status: 503 });
-      }
-      // The session guard, applied by hand because middleware does not run on an upgrade. An
-      // unauthenticated socket here would be the whole point of the proxy defeated.
-      const actor = await identifyUser(request).catch(() => null);
-      if (!actor) {
-        return new Response("Sign in first.", { status: 401 });
-      }
-      // Located per Bot when there is a supervisor, and the one shared computer when there is not.
-      let upstream: string;
-      try {
-        upstream = toStreamUrl(
-          supervisor
-            ? await supervisor.locate(streamBotId)
-            : config.computer.baseUrl,
-          streamBotId,
-        );
-      } catch (error) {
-        // Said out loud rather than falling back to another Bot's computer, which is the failure this
-        // whole path exists to prevent.
-        return new Response(
-          error instanceof Error
-            ? error.message
-            : "That Bot's computer could not be reached.",
-          { status: 502 },
-        );
-      }
-      if (server.upgrade(request, { data: { upstream } })) {
-        return undefined as unknown as Response;
-      }
-      return new Response("Expected a WebSocket upgrade.", { status: 400 });
-    }
+    // [Onda 4] O upgrade do live-screen per-bot saiu com o proxy (ver acima). O
+    // único upgrade que este processo trata é o da conversa (/v1/stream, acima);
+    // todo o resto é HTTP do app forkado.
     return app.fetch(request, { server });
   },
 });

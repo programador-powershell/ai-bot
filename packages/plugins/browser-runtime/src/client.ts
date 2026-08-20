@@ -38,6 +38,23 @@ export interface BrowserAction {
   key?: string
 }
 
+/**
+ * Quem está com o volante da sessão — espelho do ControlState do agent-computer
+ * (control.ts). Chega do computador; este cliente não inventa nem guarda: só
+ * transporta. O `secretRef`/`secretSnapshotId` diz em QUAL campo um segredo
+ * pendente entra — o valor NUNCA trafega por aqui (a cirurgia §3 é de dono da
+ * sessão, não de caminho de segredo).
+ */
+export interface BrowserControlState {
+  holder: 'bot' | 'human'
+  since: string
+  reason?: string
+  requested: boolean
+  secretWanted?: string
+  secretRef?: string
+  secretSnapshotId?: number
+}
+
 /** Falha vinda do computador, com as flags que mudam a reação do chamador. */
 export class BrowserComputerError extends Error {
   override name = 'BrowserComputerError'
@@ -85,6 +102,22 @@ export class AgentComputerClient {
       },
       body: JSON.stringify(body),
     })
+    return this.#unwrap(response)
+  }
+
+  /**
+   * O GET do agent-computer (só /control hoje). Separado do #post porque um GET
+   * com corpo é anomalia de contrato — o volante se LÊ, não se muta com payload.
+   */
+  async #get(path: string): Promise<Record<string, unknown>> {
+    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${this.#token}` },
+    })
+    return this.#unwrap(response)
+  }
+
+  async #unwrap(response: Response): Promise<Record<string, unknown>> {
     const answer = (await response.json()) as Record<string, unknown>
     if (!response.ok) {
       throw new BrowserComputerError(
@@ -94,6 +127,21 @@ export class AgentComputerClient {
       )
     }
     return answer
+  }
+
+  /** Lê o ControlState cru do computador (holder/reason/requested/secret). */
+  #asControl(answer: Record<string, unknown>): BrowserControlState {
+    return {
+      holder: answer['holder'] === 'human' ? 'human' : 'bot',
+      since: typeof answer['since'] === 'string' ? answer['since'] : '',
+      requested: answer['requested'] === true,
+      ...(typeof answer['reason'] === 'string' ? { reason: answer['reason'] } : {}),
+      ...(typeof answer['secretWanted'] === 'string' ? { secretWanted: answer['secretWanted'] } : {}),
+      ...(typeof answer['secretRef'] === 'string' ? { secretRef: answer['secretRef'] } : {}),
+      ...(typeof answer['secretSnapshotId'] === 'number'
+        ? { secretSnapshotId: answer['secretSnapshotId'] }
+        : {}),
+    }
   }
 
   async open(runtimeId: string): Promise<{ alreadyOpen: boolean }> {
@@ -124,5 +172,38 @@ export class AgentComputerClient {
 
   async act(runtimeId: string, action: BrowserAction): Promise<Record<string, unknown>> {
     return this.#post(`/session/${encodeURIComponent(runtimeId)}/act`, { ...action })
+  }
+
+  /**
+   * O VOLANTE da sessão (Take the Wheel). A cirurgia §3 é o que muda aqui: no
+   * openbot o controle era por botId (computador permanente); a chave agora é o
+   * runtimeId da execução — criado no open, morto no close. O agent-computer
+   * (server.ts/control.ts) já é a autoridade do estado; este cliente só o
+   * atravessa para a UI forkada. Enquanto o humano segura, a ação do bot é
+   * RECUSADA lá (409 humanHasControl) — nunca enfileirada.
+   */
+  async control(runtimeId: string): Promise<BrowserControlState> {
+    return this.#asControl(await this.#get(`/session/${encodeURIComponent(runtimeId)}/control`))
+  }
+
+  /** O bot pedindo ajuda: NÃO toma o controle, diz que travou e por quê. */
+  async requestControl(runtimeId: string, reason: string): Promise<BrowserControlState> {
+    return this.#asControl(
+      await this.#post(`/session/${encodeURIComponent(runtimeId)}/control/request`, { reason }),
+    )
+  }
+
+  /** Uma pessoa assumindo o volante — a partir daqui a ação do bot é recusada. */
+  async takeControl(runtimeId: string): Promise<BrowserControlState> {
+    return this.#asControl(
+      await this.#post(`/session/${encodeURIComponent(runtimeId)}/control/take`, {}),
+    )
+  }
+
+  /** A pessoa devolvendo o volante ao bot. */
+  async releaseControl(runtimeId: string): Promise<BrowserControlState> {
+    return this.#asControl(
+      await this.#post(`/session/${encodeURIComponent(runtimeId)}/control/release`, {}),
+    )
   }
 }

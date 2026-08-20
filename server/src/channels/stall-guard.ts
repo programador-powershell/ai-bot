@@ -50,8 +50,16 @@ export type AgentFetch = (
   requestInit: RequestInit,
 ) => Promise<Response>;
 
-/** Which Bot a watched stream belongs to. The name is for the sentence a person reads. */
-export type WatchedBot = { id: string; name: string };
+/**
+ * Which Bot a watched stream belongs to. The name is for the sentence a person reads.
+ *
+ * [Onda 4 — cirurgia §3] `taskRunId` amarra a corrente à EXECUÇÃO que ela serve,
+ * quando há uma. É o que move o stall-guard de "por bot" para "por TaskRun": a
+ * parada dispara e é contada pela tentativa despachada (run-<task>-a<n>), não
+ * pelo computador permanente de um bot. Opcional — o chat direto ainda vigia por
+ * bot só.
+ */
+export type WatchedBot = { id: string; name: string; taskRunId?: string };
 
 export type StallGuardOptions = {
   /** Silence this long ends the turn. Zero or less leaves every stream untouched. */
@@ -202,6 +210,10 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
       JSON.stringify({
         type: "agent-stream-stalled",
         bot: stream.bot.id,
+        // A execução parada, quando a corrente veio de um despacho: o stall é
+        // POR TaskRun. Preferido ao stalled.taskRunId? Ambos são a mesma
+        // tentativa; lê-se do bot vigiado, que é a fonte na abertura.
+        ...(stream.bot.taskRunId ? { taskRun: stream.bot.taskRunId } : {}),
         silentForMs: stalled.silentForMs,
         chunks: stalled.chunks,
         ...(turn ? { thread: turn.threadId, run: turn.runId } : {}),
@@ -228,6 +240,8 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
         targetId: stream.bot.id,
         payload: {
           bot: stream.bot.id,
+          // [Onda 4] A TaskRun parada — a chave por que uma parada agora se conta.
+          ...(stream.bot.taskRunId ? { taskRun: stream.bot.taskRunId } : {}),
           silentForMs: stalled.silentForMs,
           // Chunks, not events. One chunk can carry several AG-UI events and the boundaries are the
           // network's, so saying "events" here would be a number that looks precise and is not. Zero
@@ -272,7 +286,11 @@ export function createStallGuard(options: StallGuardOptions): StallGuard {
           typeof requestInit.body === "string" ? requestInit.body : null,
         finished: false,
       });
-      watchdog.open({ id, botId: bot.id });
+      watchdog.open({
+        id,
+        botId: bot.id,
+        ...(bot.taskRunId ? { taskRunId: bot.taskRunId } : {}),
+      });
       arm();
 
       // [Tipos do Bun] O reader do fetch chega tipado sem o `readMany` que o

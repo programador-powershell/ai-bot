@@ -19,6 +19,7 @@ import { Context } from '@aibot2/harness-kernel'
 import { createAgentComputer, type AgentComputer } from '@aibot2/agent-computer'
 
 import * as browserRuntime from './index.js'
+import { BrowserComputerError } from './client.js'
 import { BrowserRefusalError, type ExecutionTarget } from './target.js'
 
 const LONG = 30_000
@@ -131,5 +132,45 @@ describe('ctx.browser contra o agent-computer real', () => {
 
     // Agir depois do fim é 404 no computador — a sessão não existe mais.
     await expect(lease.act({ kind: 'press', key: 'Tab' })).rejects.toThrow(/runtime desconhecido/)
+  })
+
+  it('Take the Wheel: enquanto o humano segura, a ação do bot é RECUSADA (não enfileirada)', { timeout: LONG }, async () => {
+    let taskCtx!: Context
+    const scope = ctx.plugin(function taskRun(child: Context) {
+      taskCtx = child
+    })
+    await scope
+
+    const lease = await ctx.browser.open(
+      {
+        target: {
+          taskRunId: 'run-tw-a1',
+          workerId: 'pc-02',
+          leaseEpoch: 6,
+          runtimeId: 'rt-tw-a1',
+        },
+        requirements: { browser: true },
+      },
+      taskCtx,
+    )
+    await lease.navigate(`http://127.0.0.1:${fixture.port}/`)
+
+    // Uma pessoa assume o volante — o cartão que a UI mostra.
+    expect((await lease.takeControl()).holder).toBe('human')
+    expect((await lease.control()).holder).toBe('human')
+
+    // A ação do bot é RECUSADA na hora (409 humanHasControl), não guardada para
+    // depois: um clique enfileirado aterrissaria em cima do que a pessoa faz.
+    const refusal = await lease.act({ kind: 'press', key: 'Tab' }).catch((error: unknown) => error)
+    expect(refusal).toBeInstanceOf(BrowserComputerError)
+    expect((refusal as BrowserComputerError).humanHasControl).toBe(true)
+
+    // Devolvido o volante, o bot volta a agir — a recusa não deixou fila.
+    expect((await lease.releaseControl()).holder).toBe('bot')
+    const snapshot = await lease.snapshot()
+    expect(snapshot.elements.length).toBeGreaterThan(0)
+
+    await scope.dispose()
+    expect(await sessionsAlive()).toBe(0)
   })
 })

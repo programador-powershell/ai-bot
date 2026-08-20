@@ -95,6 +95,70 @@ describe('a regra task-scoped (recusas ANTES do fio)', () => {
   })
 })
 
+describe('o volante da execução (Take the Wheel pelo lease)', () => {
+  /**
+   * Fetch roteirizado para o volante: o open abre, o /control devolve o estado
+   * corrente, e o take/release trocam quem segura. Prova que o lease fala o
+   * contrato /session/{runtimeId}/control* — a chave é o runtime, nunca o bot.
+   */
+  function controlFetch() {
+    const calls: string[] = []
+    let holder: 'bot' | 'human' = 'bot'
+    const fetchFn = async (url: string): Promise<Response> => {
+      const path = new URL(url).pathname
+      calls.push(path)
+      let body: Record<string, unknown>
+      if (path.endsWith('/open')) body = { opened: true, alreadyOpen: false }
+      else if (path.endsWith('/control/take')) {
+        holder = 'human'
+        body = { holder, since: 't', requested: false }
+      } else if (path.endsWith('/control/release')) {
+        holder = 'bot'
+        body = { holder, since: 't', requested: false }
+      } else if (path.endsWith('/control/request')) {
+        body = { holder, since: 't', requested: true, reason: 'preciso do login' }
+      } else if (path.endsWith('/control')) {
+        body = { holder, since: 't', requested: false }
+      } else body = {}
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return { calls, fetchFn }
+  }
+
+  it('control()/take/release atravessam por runtimeId — a UI vê quem segura', async () => {
+    const { calls, fetchFn } = controlFetch()
+    const ctx = mount(fetchFn)
+    const lease = await ctx.browser.open({ target: target(), requirements: { browser: true } })
+
+    expect((await lease.control()).holder).toBe('bot')
+    expect((await lease.takeControl()).holder).toBe('human')
+    // Depois do take o estado LIDO reflete o humano — é o cartão que a tela mostra.
+    expect((await lease.control()).holder).toBe('human')
+    expect((await lease.releaseControl()).holder).toBe('bot')
+
+    // Toda rota do volante é escopada ao runtime da execução, não a um bot.
+    expect(calls).toEqual([
+      '/session/rt-t1-a1/open',
+      '/session/rt-t1-a1/control',
+      '/session/rt-t1-a1/control/take',
+      '/session/rt-t1-a1/control',
+      '/session/rt-t1-a1/control/release',
+    ])
+  })
+
+  it('requestControl carrega o motivo do bot para a pessoa', async () => {
+    const { fetchFn } = controlFetch()
+    const ctx = mount(fetchFn)
+    const lease = await ctx.browser.open({ target: target(), requirements: { browser: true } })
+    const state = await lease.requestControl('preciso do login')
+    expect(state.requested).toBe(true)
+    expect(state.reason).toBe('preciso do login')
+  })
+})
+
 describe('o ciclo de vida (disposer do kernel)', () => {
   it('o fim do escopo do dono fecha a sessão — sem ninguém chamar close', async () => {
     const { calls, fetchFn } = fakeFetch()

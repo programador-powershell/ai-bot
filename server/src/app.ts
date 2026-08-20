@@ -20,8 +20,7 @@ import { createComponentRoutes } from "./components/routes";
 import type { SandboxedStore } from "./components/sandboxed";
 import { createSandboxedRoutes } from "./components/sandboxed-routes";
 import type { ComponentStore } from "./components/store";
-import type { ComputerClient } from "./computer/client";
-import type { ComputerGateway } from "./computer/gateway";
+import type { ExecutionComputerGateway } from "./computer/execution-gateway";
 import type { PolicyStore } from "./computer/policy-store";
 import { createComputerRoutes } from "./computer/routes";
 import type { DeploymentConfig } from "./config";
@@ -52,10 +51,15 @@ export function createApp(
    * scope broke every server test that touches createApp even though none of them use CopilotKit.
    */
   copilotHandler?: HonoApp,
-  /** Absent when no computer is configured, and the routes are then not mounted at all. */
-  computerClient?: ComputerClient,
-  /** The only path to an acting call: policy decision, then audit row, then the action. */
-  computerGateway?: ComputerGateway,
+  /**
+   * [Onda 4 — slot APOSENTADO] Era o `ComputerClient` HTTP per-bot do openbot,
+   * retirado com a cirurgia §3 (o navegador agora é task-scoped via ctx.browser).
+   * Mantido como posição para não reindexar os ~13 argumentos posicionais
+   * seguintes desta assinatura; a montagem passa `undefined`.
+   */
+  _computerClientRetired?: undefined,
+  /** [Onda 4] O gateway task-scoped sobre ctx.browser: governa o navegador da execução por runtimeId. */
+  computerGateway?: ExecutionComputerGateway,
   /** What the gateway enforces, and what an administrator can change while running. */
   computerPolicy?: PolicyStore,
   /** Bots as durable objects: profile, roster, visibility. */
@@ -328,18 +332,14 @@ export function createApp(
     app.route("/", copilotHandler);
   }
 
-  // The Bot computer. Acting on a page needs the gateway and the policy it enforces, so all
-  // three arrive together or the routes are not mounted: a computer whose actions were ungoverned is
-  // not a reduced feature, it is the one shape of this feature that must not exist.
-  if (computerClient && computerGateway && computerPolicy) {
+  // [Onda 4] O navegador da execução. O gateway task-scoped e a política que ele
+  // aplica chegam juntos ou as rotas não montam: um navegador cujas ações fossem
+  // não governadas não é feature reduzida, é a única forma desta feature que não
+  // pode existir. Sem `config.computer` (sem agent-computer) o gateway é ausente.
+  if (computerGateway && computerPolicy) {
     app.route(
       "/api/computers",
-      createComputerRoutes(
-        computerClient,
-        computerGateway,
-        computerPolicy,
-        requireUser,
-      ),
+      createComputerRoutes(computerGateway, computerPolicy, requireUser),
     );
   }
 

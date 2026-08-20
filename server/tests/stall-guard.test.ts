@@ -101,6 +101,43 @@ describe("a Bot that stops streaming", () => {
   });
 });
 
+describe("[Onda 4] a parada é contada POR TaskRun", () => {
+  test("a linha nomeia a execução despachada, não só o bot", async () => {
+    const audit = collecting();
+    const guard = createStallGuard({ stallMs: 60, auditStore: audit.store });
+    // O bot vigiado carrega o taskRunId do despacho — a cirurgia §3.
+    const watched = guard.watch(
+      { ...BOT, taskRunId: "run-t5-a2" },
+      async () => sse(saysNothing()),
+    );
+
+    const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    await new Response(response.body).text();
+    guard.stop();
+
+    const row = audit.rows.find(
+      (event) => event.eventType === "agent.stream_stalled",
+    );
+    expect(row?.payload.taskRun).toBe("run-t5-a2");
+  });
+
+  test("sem despacho a linha segue existindo, só sem taskRun (chat direto)", async () => {
+    const audit = collecting();
+    const guard = createStallGuard({ stallMs: 60, auditStore: audit.store });
+    const watched = guard.watch(BOT, async () => sse(saysNothing()));
+
+    const response = await watched("http://bot.internal/ag-ui", RUN_REQUEST);
+    await new Response(response.body).text();
+    guard.stop();
+
+    const row = audit.rows.find(
+      (event) => event.eventType === "agent.stream_stalled",
+    );
+    expect(row).toBeDefined();
+    expect(row?.payload.taskRun).toBeUndefined();
+  });
+});
+
 describe("the sentence a person is left with", () => {
   test("is the whole explanation, because nothing is drawn around it", async () => {
     const guard = createStallGuard({ stallMs: 60 });

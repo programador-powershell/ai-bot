@@ -70,6 +70,22 @@ export const auditEventTypes = [
   "computer.help_requested",
   "computer.control_taken",
   "computer.control_released",
+  /*
+   * [Onda 4 — cirurgia §3] O navegador é TASK-SCOPED: nasce no open da execução
+   * e morre no close. Estas duas linhas são a trilha desse ciclo por runtimeId
+   * (nunca por bot): um `session_opened` sem o `session_closed` correspondente é
+   * exatamente o vazamento de "perfil permanente por bot" que a cirurgia removeu
+   * — visível, não presumido.
+   */
+  "computer.session_opened",
+  "computer.session_closed",
+  /*
+   * [Onda 4] O bot tentou agir enquanto uma PESSOA segurava o volante. Distinto
+   * de action_refused (que é decisão de política) e de action_failed (que é
+   * efeito quebrado): aqui nada decidiu contra o bot e nada quebrou — o Take the
+   * Wheel RECUSOU a ação (não enfileirou) porque o humano está no controle.
+   */
+  "computer.action_blocked_by_human",
   // A credential a person entered by hand. The row records that it happened, what it was called and
   // which field it went in; the value is on a path this trail is not on.
   "computer.secret_requested",

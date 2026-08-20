@@ -1,5 +1,15 @@
 /**
  * Computer control API helpers and screenshot-to-page coordinate conversion.
+ *
+ * [Onda 4 — cirurgia §3] O `computerId` que estes helpers usam É AGORA O
+ * runtimeId da EXECUÇÃO (a sessão de browser task-scoped), nunca um botId de
+ * computador permanente. O servidor expõe o volante em
+ * `/api/computers/:runtimeId/control*` e a lista de execuções vivas em
+ * `GET /api/computers` (a presença observável — o que substitui o screencast do
+ * Chromium permanente). A entrada por PIXEL e por SEGREDO (supplySecret/
+ * sendHumanInput/pageCoordinates) pertence ao console humano com screencast, que
+ * é PENDÊNCIA declarada da onda 7 (o agent-computer não expõe frames nesta leva);
+ * ficam aqui prontas para quando o console entrar, sem rota viva ainda.
  */
 
 export type ControlState = {

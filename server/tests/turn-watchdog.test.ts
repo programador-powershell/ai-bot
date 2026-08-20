@@ -137,6 +137,27 @@ describe("a turn is judged on activity, not on how long it has run", () => {
   });
 });
 
+describe("[Onda 4] a parada é POR TaskRun quando a corrente veio de um despacho", () => {
+  test("o taskRunId da execução viaja até o stall", () => {
+    const { time, stalled, watchdog } = watching(60_000);
+    watchdog.open({ id: "stream-1", botId: "risk-analyst", taskRunId: "run-t3-a1" });
+
+    time.advance(60_000);
+    expect(watchdog.sweep()).toBe(1);
+    // O stall nomeia a EXECUÇÃO parada, não só o bot — a chave da cirurgia §3.
+    expect(stalled[0]?.taskRunId).toBe("run-t3-a1");
+    expect(stalled[0]?.botId).toBe("risk-analyst");
+  });
+
+  test("sem despacho o stall segue existindo, só sem taskRunId (chat direto)", () => {
+    const { time, stalled, watchdog } = watching(60_000);
+    watchdog.open({ id: "stream-1", botId: "risk-analyst" });
+    time.advance(60_000);
+    expect(watchdog.sweep()).toBe(1);
+    expect(stalled[0]?.taskRunId).toBeUndefined();
+  });
+});
+
 describe("a stalled stream is reported exactly once", () => {
   test("sweeping again finds nothing, because the entry went with the callback", () => {
     const { time, stalled, watchdog } = watching(1_000);

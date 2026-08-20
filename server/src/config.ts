@@ -63,12 +63,10 @@ export type DeploymentConfig = {
     baseUrl: string;
     /** The secret every computer requires of its caller. */
     token?: string;
-    /**
-     * The container supervisor, when each Bot is to get a computer of its own. Absent means one
-     * shared computer at `baseUrl`, which is what a laptop wants and is honest about being one
-     * machine.
-     */
-    supervisor?: { baseUrl: string; token?: string };
+    // [Onda 4 — cirurgia §3] O `supervisor` (provisionador 1:1 por bot) foi
+    // APOSENTADO: quem provisiona compute é o control plane, não o server, e o
+    // navegador é task-scoped (nasce/morre com a execução). Não há mais
+    // computador permanente por bot para localizar.
     /** True on a laptop, where browsing the deployment's own services is the point. */
     allowPrivateHosts: boolean;
     /**
@@ -262,22 +260,14 @@ function computerConfig(
    * unauthenticated callers that can reach its port.
    */
   const computerToken = optional(environment, "COMPUTER_TOKEN");
-  const supervisorUrl = url(environment, "COMPUTER_SUPERVISOR_URL");
-  const supervisorToken = optional(environment, "SUPERVISOR_TOKEN");
+  // [Onda 4] COMPUTER_SUPERVISOR_URL/SUPERVISOR_TOKEN saíram com o supervisor:
+  // não há mais provisionamento 1:1 por bot no server.
   return {
     baseUrl,
     allowPrivateHosts:
       optional(environment, "AGENT_COMPUTER_ALLOW_PRIVATE_HOSTS") === "true",
     ...(policy ? { policy } : {}),
     ...(computerToken ? { token: computerToken } : {}),
-    ...(supervisorUrl
-      ? {
-          supervisor: {
-            baseUrl: supervisorUrl,
-            ...(supervisorToken ? { token: supervisorToken } : {}),
-          },
-        }
-      : {}),
   };
 }
 
