@@ -4,6 +4,7 @@ import type { AuditStore } from "../audit";
 import { recordAuditEvent } from "../audit";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import { comoRespostaDeComponente, type FunilDoChassi } from "../governo/funil";
 import { DATA_FUNCTIONS, dataFunction } from "./functions";
 import { ComponentNotFoundError, type ComponentStore } from "./store";
 
@@ -32,6 +33,13 @@ export function createComponentRoutes(
   store: ComponentStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
   auditStore?: AuditStore,
+  /**
+   * [Onda 3] O funil do chassis. Presente (produção), a decisão POR RENDER e
+   * a leitura de dados entram pelo action-gateway: Gate + envelopes duráveis
+   * — nenhum efeito por fora. Ausente (dublês de teste), as rotas decidem
+   * direto no store, que continua carregando os grants.
+   */
+  funil?: FunilDoChassi,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -135,6 +143,7 @@ export function createComponentRoutes(
     const body = (await context.req.json().catch(() => null)) as {
       agentId?: unknown;
       functions?: unknown;
+      threadId?: unknown;
     } | null;
     const agentId = typeof body?.agentId === "string" ? body.agentId : "";
     if (!agentId) {
@@ -145,6 +154,22 @@ export function createComponentRoutes(
           (entry): entry is string => typeof entry === "string",
         )
       : [];
+
+    // [Onda 3] Produção: a decisão por render entra pelo action-gateway — o
+    // veredito do Gate e o grant do componente viram envelopes duráveis.
+    if (funil) {
+      const result = await funil.decidirRender({
+        name,
+        agentId,
+        actorId: context.var.actor?.email ?? "unknown",
+        functions,
+        ...(typeof body?.threadId === "string" && body.threadId !== ""
+          ? { threadId: body.threadId }
+          : {}),
+      });
+      const resposta = comoRespostaDeComponente(result);
+      return context.json(resposta.body as Record<string, unknown>, resposta.status);
+    }
 
     const decision = await store.decide(name, agentId);
     if (!decision.allowed) {
@@ -203,6 +228,7 @@ export function createComponentRoutes(
       function?: unknown;
       args?: unknown;
       agentId?: unknown;
+      threadId?: unknown;
     } | null;
     const functionName =
       typeof body?.function === "string" ? body.function : "";
@@ -212,6 +238,28 @@ export function createComponentRoutes(
         { error: "The function and the Bot are both required." },
         400,
       );
+    }
+
+    // [Onda 3] Produção: a leitura de dados do componente É o efeito, e efeito
+    // entra pelo action-gateway — sem decisão do portão, nada roda.
+    if (funil) {
+      const result = await funil.lerDadosDeComponente({
+        name,
+        agentId,
+        actorId: context.var.actor?.email ?? "unknown",
+        function: functionName,
+        args:
+          body?.args !== null &&
+          typeof body?.args === "object" &&
+          !Array.isArray(body?.args)
+            ? (body.args as Record<string, unknown>)
+            : {},
+        ...(typeof body?.threadId === "string" && body.threadId !== ""
+          ? { threadId: body.threadId }
+          : {}),
+      });
+      const resposta = comoRespostaDeComponente(result);
+      return context.json(resposta.body as Record<string, unknown>, resposta.status);
     }
 
     const refuse = async (reason: string) => {

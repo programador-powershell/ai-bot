@@ -52,13 +52,39 @@ export type MensagemDaConversa = {
   emStream?: boolean;
 };
 
+/**
+ * [Onda 3] Um pedido de aprovação VIVO, projetado do replay: approval.request
+ * sem approval.decision e sem tool.result = cartão na tela. Como a projeção é
+ * pura sobre o log durável, o cartão RENASCE depois de um reinício do server —
+ * e o prazo conta do `ts` ORIGINAL do pedido, nunca do momento do replay.
+ */
+export type AprovacaoPendente = {
+  callId: string;
+  tool: string;
+  /** O ts do envelope original — a única fonte do prazo do cartão. */
+  ts: string;
+  risk?: string;
+  summary?: string;
+  detail?: string;
+  turn?: string;
+};
+
+/** O prazo do servidor (APPROVAL_TIMEOUT_MS do funil), espelhado para a tela. */
+export const PRAZO_DA_APROVACAO_MS = 10 * 60 * 1000;
+
 export type EstadoDaConversa = {
   mensagens: MensagemDaConversa[];
   /** Há um turno aberto (prompt sem done) — o composer mostra "pensando". */
   turnoAberto: boolean;
+  /** Os cartões de aprovação vivos — ver AprovacaoPendente. */
+  aprovacoes: AprovacaoPendente[];
 };
 
-export const CONVERSA_VAZIA: EstadoDaConversa = { mensagens: [], turnoAberto: false };
+export const CONVERSA_VAZIA: EstadoDaConversa = {
+  mensagens: [],
+  turnoAberto: false,
+  aprovacoes: [],
+};
 
 /**
  * Conferência estrutural do que chegou do fio — a mesma régua do desktop: o
@@ -169,10 +195,54 @@ export function aplicarEnvelope(
   if (envelope.kind === "done" || envelope.kind === "error") {
     // O turno fechou: o que estava em stream vira definitivo.
     return {
+      ...estado,
       turnoAberto: false,
       mensagens: estado.mensagens.map((mensagem) =>
         mensagem.emStream === true ? { ...mensagem, emStream: false } : mensagem,
       ),
+    };
+  }
+
+  // [Onda 3] O cartão de aprovação nasce do approval.request…
+  if (envelope.kind === "approval.request") {
+    const payload = envelope.payload as
+      | { callId?: unknown; tool?: unknown; risk?: unknown; summary?: unknown; detail?: unknown }
+      | undefined;
+    if (typeof payload?.callId !== "string" || typeof payload.tool !== "string") {
+      return estado;
+    }
+    const callId = payload.callId;
+    const cartao: AprovacaoPendente = {
+      callId,
+      tool: payload.tool,
+      ts: envelope.ts,
+      ...(typeof payload.risk === "string" ? { risk: payload.risk } : {}),
+      ...(typeof payload.summary === "string" ? { summary: payload.summary } : {}),
+      ...(typeof payload.detail === "string" ? { detail: payload.detail } : {}),
+      ...(envelope.turn !== undefined ? { turn: envelope.turn } : {}),
+    };
+    return {
+      ...estado,
+      // Replay repetido não duplica cartão: o callId é a identidade.
+      aprovacoes: [
+        ...estado.aprovacoes.filter((pendente) => pendente.callId !== callId),
+        cartao,
+      ],
+    };
+  }
+
+  // …e morre com a decisão OU com o desfecho (o timeout recusa por
+  // tool.result, então prazo estourado também fecha o cartão).
+  if (envelope.kind === "approval.decision" || envelope.kind === "tool.result") {
+    const payload = envelope.payload as { callId?: unknown } | undefined;
+    if (typeof payload?.callId !== "string") return estado;
+    const callId = payload.callId;
+    if (!estado.aprovacoes.some((pendente) => pendente.callId === callId)) {
+      return estado;
+    }
+    return {
+      ...estado,
+      aprovacoes: estado.aprovacoes.filter((pendente) => pendente.callId !== callId),
     };
   }
 

@@ -479,6 +479,107 @@ describe('aprovação durável', () => {
     controller.abort()
     await running
   })
+
+  it('[Onda 3] rearmada, a decisão pós-reinício FUNCIONA: allow re-executa com os args do tool.call durável', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'aibot2-gateway-'))
+    cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
+    const location = join(dir, 'log.db')
+
+    // Primeira vida: o pedido fica pendente e o processo "morre".
+    const store1 = SqliteEventStore.open(location)
+    await store1.createSession({ id: 's1', specialist: 'code' })
+    const rig1 = await buildRig({ store: store1, approvalTimeoutMs: 60_000 })
+    const controller = new AbortController()
+    const running = rig1.gateway
+      .execute({
+        sessionId: 's1', specialistId: 'code', tool: 'fs.write',
+        args: { path: 'a.txt', contents: 'oi' }, signal: controller.signal,
+      })
+      .catch(() => undefined)
+    const before = await firstPending(rig1.gateway, 's1')
+    await store1.close()
+
+    // Segunda vida: rearmar devolve o waiter — decide() volta a ter destino.
+    const store2 = SqliteEventStore.open(location)
+    cleanups.push(() => store2.close())
+    const rig2 = await buildRig({ store: store2, approvalTimeoutMs: 60_000 })
+    expect(await rig2.gateway.rearmPendingApprovals()).toBe(1)
+
+    rig2.gateway.decide({ callId: before.request.callId, allow: true, scope: 'digest' })
+
+    // O efeito RODA nesta vida (o executor da segunda vida é chamado com os
+    // argumentos do tool.call durável) e o log fecha com tool.result ok.
+    const result = await waitFor(async () => {
+      const trail = await envelopes(store2, 's1')
+      return trail.find((e) => e.kind === 'tool.result')
+    }, 'tool.result pós-reinício')
+    expect((result.payload as ToolResult).ok).toBe(true)
+    expect(rig2.executor.calls).toEqual([
+      { sessionId: 's1', tool: 'fs.write', args: { path: 'a.txt', contents: 'oi' } },
+    ])
+    // A decisão virou envelope durável ANTES do desfecho, na ordem do caminho vivo.
+    const kinds = (await envelopes(store2, 's1')).map((e) => e.kind)
+    expect(kinds).toEqual(['tool.call', 'approval.request', 'approval.decision', 'tool.result'])
+    // E a concessão pós-reinício vale como no caminho vivo (escopo digest).
+    expect(rig2.gateway.gate.granted().some((linha) => linha.includes('fs.write'))).toBe(true)
+
+    controller.abort()
+    await running
+
+    // O cartão não volta: decisão gravada encerra o reaparecimento.
+    expect(await rig2.gateway.pendingApprovals('s1')).toHaveLength(0)
+  })
+
+  it('[Onda 3] o prazo do rearme conta do TS ORIGINAL: pedido vencido durante a queda recusa já; o que resta, resta', async () => {
+    const store = SqliteEventStore.open(':memory:')
+    cleanups.push(() => store.close())
+    await store.createSession({ id: 's1', specialist: 'code' })
+
+    // Dois pedidos órfãos escritos direto no log (é o que um reinício deixa):
+    // um VELHO, do outro lado do prazo, e um FRESCO.
+    const timeoutMs = 60_000
+    const tsVencido = new Date(Date.now() - timeoutMs - 5_000).toISOString()
+    const tsFresco = new Date().toISOString()
+    for (const [callId, ts] of [
+      ['c-vencido', tsVencido],
+      ['c-fresco', tsFresco],
+    ] as const) {
+      await store.append('s1', {
+        id: `e-call-${callId}`, ts, turn: 't1', kind: 'tool.call',
+        from: { kind: 'specialist', id: 'code', specialist: 'code' },
+        payload: { callId, tool: 'fs.write', digest: 'd'.repeat(16), args: { path: 'x' } },
+      })
+      await store.append('s1', {
+        id: `e-req-${callId}`, ts, turn: 't1', kind: 'approval.request',
+        from: { kind: 'specialist', id: 'code', specialist: 'code' },
+        payload: { callId, tool: 'fs.write', risk: 'write', summary: 'x', detail: '{}', digest: 'd'.repeat(16) },
+      })
+    }
+
+    const rig = await buildRig({ store, approvalTimeoutMs: timeoutMs })
+    expect(await rig.gateway.rearmPendingApprovals()).toBe(2)
+
+    // O vencido recusa AGORA (o relógio não zerou com a queda)…
+    await waitFor(async () => {
+      const trail = await envelopes(store, 's1')
+      const result = trail.find(
+        (e) => e.kind === 'tool.result' && (e.payload as ToolResult).callId === 'c-vencido',
+      )
+      return result
+    }, 'recusa por prazo do pedido vencido')
+    const vencido = (await envelopes(store, 's1')).find(
+      (e) => e.kind === 'tool.result' && (e.payload as ToolResult).callId === 'c-vencido',
+    )!
+    expect((vencido.payload as ToolResult).ok).toBe(false)
+    expect((vencido.payload as ToolResult).error).toContain('prazo')
+    expect(rig.executor.calls).toHaveLength(0)
+
+    // …e o fresco continua pendente, com o tempo que lhe restava.
+    const pendentes = await rig.gateway.pendingApprovals('s1')
+    expect(pendentes.map((p) => p.request.callId)).toEqual(['c-fresco'])
+    // O cartão carrega o TS ORIGINAL — é dele que a tela desenha o prazo.
+    expect(pendentes[0]!.ts).toBe(tsFresco)
+  })
 })
 
 /* --------------------- política declarada, no plugin ---------------------- */

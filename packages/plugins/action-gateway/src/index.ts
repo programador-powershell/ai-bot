@@ -15,6 +15,7 @@ import type { Context } from '@aibot2/harness-kernel'
 import { ActionGatewayService, type ActionGatewayConfig } from './service.js'
 
 export * from './gate.js'
+export * from './rules.js'
 export * from './intents.js'
 export * from './artifacts.js'
 export * from './tool-output.js'

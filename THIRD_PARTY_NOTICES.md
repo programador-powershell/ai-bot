@@ -47,7 +47,14 @@ próprio projeto de origem declara.
     event log; o chat do app fala esse protocolo (`app/src/lib/chat`) — o
     `@copilotkit/react-core` saiu do caminho da conversa e permanece SÓ no
     preview do playground, atrás de stub com prazo final na onda 3; decisão
-    registrada da onda: `@ag-ui/*` PERMANECE como protocolo de bots externos.
+    registrada da onda: `@ag-ui/*` PERMANECE como protocolo de bots externos;
+  - na Onda 3 (governo unificado): **`cel-js` removido do lockfile** — o motor
+    de decisão das regras do computer gateway é reimplementação clean-room
+    própria (`packages/plugins/action-gateway/src/rules.ts`, mesmo
+    subconjunto/semântica fail-closed; o envelope govern() do openbot foi
+    mantido); o import inerte de `@copilotkit/react-core/v2` no transcript da
+    conversa morreu (a linha de ferramenta é desenho próprio) — o que resta de
+    `@copilotkit/react-core` é SÓ o preview do playground.
 - **Licença:**
 
 ```

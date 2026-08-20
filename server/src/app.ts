@@ -27,6 +27,11 @@ import { createComputerRoutes } from "./computer/routes";
 import type { DeploymentConfig } from "./config";
 import type { ConnectorAdminService } from "./connectors";
 import type { CredentialAdminService, CredentialInput } from "./credentials";
+import type { FunilDoChassi } from "./governo/funil";
+import {
+  createEnvelopeAuditRoutes,
+  type DepsDaAuditoria,
+} from "./governo/rotas-auditoria";
 import { createPluginRoutes } from "./plugins/routes";
 import type { PluginStore } from "./plugins/store";
 import type { PackageStatusReader } from "./tenant-package";
@@ -110,6 +115,19 @@ export function createApp(
    * frame, nunca na URL). Nunca vai para log.
    */
   streamAccess?: { token: string; path: string },
+  /**
+   * [Onda 3] O funil do chassis: MCP e componentes generativos entram pelo
+   * action-gateway quando ele está montado (produção sempre monta). Ausente,
+   * as rotas de efeito ficam no caminho direto do store — que os dublês de
+   * teste usam para provar o store isolado.
+   */
+  funil?: FunilDoChassi,
+  /**
+   * [Onda 3] A leitura de auditoria sobre os ENVELOPES do event log (a outra
+   * verdade, ao lado da trilha relacional). Ausente, as rotas não montam —
+   * um deployment sem event log não finge ter envelopes.
+   */
+  auditoriaDeEnvelopes?: DepsDaAuditoria,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -351,12 +369,22 @@ export function createApp(
   if (componentStore) {
     app.route(
       "/api/components",
-      createComponentRoutes(componentStore, requireUser, auditStore),
+      createComponentRoutes(componentStore, requireUser, auditStore, funil),
     );
   }
 
   if (pluginStore) {
-    app.route("/api/plugins", createPluginRoutes(pluginStore, requireUser));
+    app.route(
+      "/api/plugins",
+      createPluginRoutes(pluginStore, requireUser, funil),
+    );
+  }
+
+  if (auditoriaDeEnvelopes) {
+    app.route(
+      "/api/admin/envelopes",
+      createEnvelopeAuditRoutes(auditoriaDeEnvelopes, requireUser),
+    );
   }
 
   if (sandboxedStore) {

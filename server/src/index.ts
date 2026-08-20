@@ -13,8 +13,6 @@
  */
 import { join } from "node:path";
 import { serve } from "bun";
-import { SqliteEventStore } from "@aibot2/domain-events";
-import { SessionBus } from "@aibot2/harness-openbot-bridge";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createApp } from "./app";
 import { criarConversaDoCanal } from "./channels/conversa";
@@ -54,6 +52,9 @@ import {
   createCredentialStore,
 } from "./credentials";
 import { createDatabase, migrateDatabase } from "./db/client";
+import { CHASSIS_BOT_TOOLS, criarExecutorDoChassi } from "./governo/executor";
+import { criarFunilDoChassi } from "./governo/funil";
+import { montarNucleo } from "./montagem/montagem";
 import { createPluginStore } from "./plugins/store";
 import {
   createPackageStatusReader,
@@ -102,41 +103,15 @@ const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
 
 /*
- * [Onda 2] A CONVERSA do chassis: o event log (events.db, StorageDriver sobre
- * node:sqlite — NUNCA drizzle, fronteira do §4.4) + o session bus + o stream
- * hello/ready/replay servido pelo WS nativo do Bun. A config é a MESMA do
- * transporte de referência (AIBOT_DATA_DIR/AIBOT_TOKEN/AIBOT_ALLOW_ORIGINS,
- * token materializado no primeiro boot): é o que deixa o desktop Tauri atual e
- * o app forkado discarem O MESMO server com o mesmo segredo (compat dupla).
+ * [Onda 2→3] A config do stream é a MESMA do transporte de referência
+ * (AIBOT_DATA_DIR/AIBOT_TOKEN/AIBOT_ALLOW_ORIGINS, token materializado no
+ * primeiro boot): é o que deixa o desktop Tauri atual e o app forkado discarem
+ * O MESMO server com o mesmo segredo (compat dupla). O event log e o session
+ * bus agora nascem DENTRO do kernel (montagem completa, mais abaixo) — o
+ * stream é criado depois dos stores do chassis, porque o executor do funil
+ * precisa deles.
  */
 const configDoStream = carregarConfigDoStream();
-const eventLog = SqliteEventStore.open(join(configDoStream.dataDir, "events.db"));
-const sessionBus = new SessionBus(eventLog);
-const conversa = criarConversaDoCanal(eventLog, sessionBus);
-const streamDoChassi = criarStreamDoChassi({
-  store: eventLog,
-  bus: sessionBus,
-  token: configDoStream.token,
-  allowOrigins: configDoStream.allowOrigins,
-  // O funil de entrada da onda 2: prompt vira envelope durável no log. As
-  // decisões/aprovações entram no funil do action-gateway na onda 3.
-  onInbound: (sessionId, envelope) => {
-    void conversa.receberDoTransporte(sessionId, envelope).catch((erro) => {
-      console.error(
-        JSON.stringify({
-          type: "stream-inbound",
-          message: erro instanceof Error ? erro.message : String(erro),
-          note: "Um prompt que não pôde ser gravado NÃO vira resposta fantasma; o cliente reenvia.",
-        }),
-      );
-    });
-  },
-  log: (mensagem, campos) => {
-    // Campos sensíveis nunca chegam aqui — o transporte loga TAMANHOS de
-    // token, nunca o valor (a mesma régua do transporte de referência).
-    console.warn(`[stream] ${mensagem}`, campos ?? "");
-  },
-});
 
 const database = createDatabase(config.databaseUrl);
 // Migrações geradas, aplicadas no boot: um deployment novo começa do zero e o
@@ -287,6 +262,118 @@ console.info(
         }),
   }),
 );
+/*
+ * [Onda 3] A MONTAGEM COMPLETA: o kernel sobe com TODOS os plugins — os 7 que
+ * estavam prontos e soltos + os seams declarados (montagem.ts) — e o chassis
+ * entrega ao funil o executor REAL do que já existe aqui: mcp.call e
+ * componentes generativos, decididos por chamada pelos grants do chassis.db.
+ * O event log (events.db) e o session bus passam a ser os do kernel — a
+ * fronteira do §4.4 continua: drizzle nunca toca neles.
+ */
+const nucleo = await montarNucleo(
+  { dataDir: configDoStream.dataDir },
+  {
+    tools: criarExecutorDoChassi({
+      pluginStore,
+      componentStore,
+      auditStore: bootAuditStore,
+    }),
+    chassisBotTools: CHASSIS_BOT_TOOLS,
+    ...(config.computer
+      ? {
+          browser: {
+            baseUrl: config.computer.baseUrl,
+            token: config.computer.token ?? "",
+          },
+        }
+      : {}),
+    log: (mensagem, campos) => {
+      console.warn(`[kernel] ${mensagem}`, campos ?? "");
+    },
+  },
+);
+const eventLog = nucleo.ctx.eventos;
+const sessionBus = nucleo.ctx.sessionBus;
+const conversa = criarConversaDoCanal(eventLog, sessionBus);
+const funil = criarFunilDoChassi({
+  gateway: nucleo.ctx.actionGateway,
+  conversa,
+  pluginStore,
+});
+
+/*
+ * [Onda 3] As aprovações que ficaram pendentes quando o processo anterior
+ * morreu voltam a ter waiter e PRAZO — contado do ts original do pedido, não
+ * do boot. O cartão reaparece na UI pelo replay; a decisão chega pelo stream.
+ */
+const aprovacoesRearmadas = await nucleo.ctx.actionGateway.rearmPendingApprovals();
+if (aprovacoesRearmadas > 0) {
+  console.info(
+    JSON.stringify({
+      type: "approvals-rearmed",
+      count: aprovacoesRearmadas,
+      note: "Pedidos de aprovação de antes do reinício voltaram à espera com o prazo original.",
+    }),
+  );
+}
+
+const streamDoChassi = criarStreamDoChassi({
+  store: eventLog,
+  bus: sessionBus,
+  token: configDoStream.token,
+  allowOrigins: configDoStream.allowOrigins,
+  // [Onda 3] O ready anuncia o catálogo REAL do specialist-registry, lido a
+  // cada hello (overlay a quente troca o catálogo sem derrubar o processo) —
+  // a observação do conferente da Onda 2 era exatamente "hoje sai vazio".
+  specialists: () => nucleo.ctx.specialists.ids(),
+  onInbound: (sessionId, envelope) => {
+    // [Onda 3] A decisão humana do cartão de aprovação entra no funil —
+    // inclusive para pedidos REARMADOS de antes do reinício.
+    if (envelope.kind === "approval.decision") {
+      const payload = envelope.payload as
+        | { callId?: unknown; allow?: unknown; scope?: unknown; comment?: unknown }
+        | undefined;
+      if (typeof payload?.callId !== "string" || typeof payload.allow !== "boolean") {
+        return;
+      }
+      try {
+        nucleo.ctx.actionGateway.decide({
+          callId: payload.callId,
+          allow: payload.allow,
+          ...(typeof payload.scope === "string" ? { scope: payload.scope } : {}),
+          ...(typeof payload.comment === "string" ? { comment: payload.comment } : {}),
+        });
+      } catch (erro) {
+        // Decisão sem pedido pendente: clique repetido, duas janelas, ou um
+        // cartão de outra vida do processo que o prazo já fechou. Barulho no
+        // log, nunca queda — e nunca consentimento inventado.
+        console.warn(
+          JSON.stringify({
+            type: "approval-decision",
+            message: erro instanceof Error ? erro.message : String(erro),
+          }),
+        );
+      }
+      return;
+    }
+    // O funil de entrada da onda 2: prompt vira envelope durável no log.
+    void conversa.receberDoTransporte(sessionId, envelope).catch((erro) => {
+      console.error(
+        JSON.stringify({
+          type: "stream-inbound",
+          message: erro instanceof Error ? erro.message : String(erro),
+          note: "Um prompt que não pôde ser gravado NÃO vira resposta fantasma; o cliente reenvia.",
+        }),
+      );
+    });
+  },
+  log: (mensagem, campos) => {
+    // Campos sensíveis nunca chegam aqui — o transporte loga TAMANHOS de
+    // token, nunca o valor (a mesma régua do transporte de referência).
+    console.warn(`[stream] ${mensagem}`, campos ?? "");
+  },
+});
+
 /**
  * One Bot's endpoint must not take down the platform.
  *
@@ -379,6 +466,14 @@ const app = createApp(
   // [Onda 2] O token do stream para o navegador autenticado — o hello continua
   // sendo quem autentica o socket (token no primeiro frame, nunca na URL).
   { token: configDoStream.token, path: CAMINHO_DO_STREAM },
+  // [Onda 3] O funil: MCP e componentes generativos entram pelo action-gateway.
+  funil,
+  // [Onda 3] A leitura de auditoria sobre os envelopes (admin), incluindo as
+  // aprovações pendentes reconstruídas do replay.
+  {
+    store: eventLog,
+    pendentes: (sessionId) => nucleo.ctx.actionGateway.pendingApprovals(sessionId),
+  },
 );
 
 /**
@@ -568,14 +663,15 @@ if (config.devNoAuth) {
   );
 }
 
-// [R2] O listener do Postgres saiu com o Postgres. [Onda 2] O que o
-// encerramento agora deve é ao STREAM: fechar os WS vivos com 1001 (o cliente
-// sabe que deve reconectar com resumeFrom) e soltar o event log — no Windows,
-// um handle de sqlite aberto prende o arquivo.
+// [R2] O listener do Postgres saiu com o Postgres. [Onda 2→3] O que o
+// encerramento deve é ao STREAM (fechar os WS vivos com 1001 — o cliente sabe
+// que deve reconectar com resumeFrom) e ao KERNEL: o dispose desmonta os
+// plugins em ordem reversa e solta o event log — no Windows, um handle de
+// sqlite aberto prende o arquivo.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     streamDoChassi.fecharTodas();
-    void eventLog.close().finally(() => process.exit(0));
+    void nucleo.dispose().finally(() => process.exit(0));
   });
 }
 

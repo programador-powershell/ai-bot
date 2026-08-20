@@ -62,6 +62,11 @@ describe('montagem do servidor', () => {
     const ready = (await cliente.proximoJson()) as Envelope
     expect(ready.kind).toBe('ready')
     expect((ready.payload as { seq: number }).seq).toBe(0)
+    // [Onda 3] O ready anuncia o catálogo REAL do specialist-registry — a
+    // observação do conferente da Onda 2 era exatamente "hoje sai vazio".
+    const anunciados = (ready.payload as { specialists: string[] }).specialists
+    expect(anunciados).toEqual(servidor.ctx.specialists.ids())
+    expect(anunciados.length).toBeGreaterThan(0)
   })
 
   it('a rota /health responde com a forma do oráculo (contagens, nunca conteúdo)', async () => {
@@ -72,9 +77,12 @@ describe('montagem do servidor', () => {
       status: 'ok',
       product: 'AI-BOT',
       protocol: 1,
-      specialists: 0,
+      // A contagem é do catálogo compilado do registry (montagem completa da
+      // Onda 3) — contagens, nunca conteúdo, continua valendo.
+      specialists: servidor.ctx.specialists.ids().length,
       models: 0,
     })
+    expect(servidor.ctx.specialists.ids().length).toBeGreaterThan(0)
   })
 
   it('token errado no hello é 1008 — a config chegou inteira ao transporte', async () => {

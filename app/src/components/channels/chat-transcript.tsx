@@ -1,8 +1,7 @@
 import type { Message } from "@ag-ui/core";
 import { IconBox } from "@tabler/icons-react";
-import { useRenderToolCall } from "@copilotkit/react-core/v2";
 import { motion, useReducedMotion } from "motion/react";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
 import { markdownComponents } from "@/lib/markdown";
 import { EASE_OUT, ENTRANCE_SECONDS } from "@/lib/motion";
@@ -419,18 +418,18 @@ const TranscriptMessage = memo(function TranscriptMessage({
 /**
  * One drawn tool call, memoised on the same terms.
  *
- * The `toolCall` object is rebuilt here from its parts rather than passed down, because the one on
- * the message is a new object on every chunk and would defeat the memo exactly as the text items
- * did. A finished chart re-rendering on every token of the sentence after it is not free.
- *
- * `useRenderToolCall` is called HERE rather than passed in as a prop: a function whose identity the
- * parent cannot guarantee is the classic way to make a memo boundary useless.
+ * [Onda 3] O `useRenderToolCall` do @copilotkit/react-core/v2 morreu aqui — o
+ * import estava INERTE desde a Onda 2 (o provider do CopilotKit não monta
+ * mais; a conversa é o replay do log) e dependência inerte que fica é como o
+ * apps.zip de 5 GB: entra calada no histórico. Toda chamada de ferramenta é
+ * desenhada como a linha simples (ToolLine) — o mesmo desenho que o computer e
+ * as ferramentas MCP usam, então uma chamada qualquer lê como um evento comum.
+ * Os renderers ricos por ferramenta voltam na Onda 7, registrados no NOSSO
+ * protocolo (projeção dos envelopes), não no runtime de terceiro.
  */
 const TranscriptToolCall = memo(function TranscriptToolCall({
   delay,
-  toolCallId,
   name,
-  args,
   result,
 }: {
   delay: number;
@@ -439,44 +438,10 @@ const TranscriptToolCall = memo(function TranscriptToolCall({
   args: string;
   result?: string;
 }) {
-  const renderToolCall = useRenderToolCall();
-  const toolCall = useMemo(
-    () => ({
-      id: toolCallId,
-      type: "function" as const,
-      function: { name, arguments: args },
-    }),
-    [toolCallId, name, args],
-  );
-
-  const drawn = renderToolCall({
-    toolCall,
-    ...(result === undefined
-      ? {}
-      : {
-          toolMessage: {
-            id: `${toolCallId}-result`,
-            role: "tool",
-            toolCallId,
-            content: result,
-          },
-        }),
-  });
-
   return (
     <Arriving delay={delay}>
       <ToolRenderBoundary name={name}>
-        {/*
-         * A TOOL WITH NO REGISTERED RENDERER STILL HAPPENED. `renderToolCall` draws whatever was
-         * registered for the name and nothing at all for anything else, which left a Bot that called
-         * something the app does not know about looking like a Bot that did nothing — the same
-         * failure `ToolRenderBoundary` exists to prevent, arriving by a different route.
-         *
-         * The fallback is a plain tool line: what was called, shimmering until its result lands. It
-         * is the same line the computer and MCP tools draw, so an unrecognised call reads as an
-         * ordinary event rather than as damage.
-         */}
-        {drawn ?? <ToolLine label={name} running={result === undefined} />}
+        <ToolLine label={name} running={result === undefined} />
       </ToolRenderBoundary>
     </Arriving>
   );

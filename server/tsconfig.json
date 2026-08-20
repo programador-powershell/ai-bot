@@ -18,6 +18,15 @@
   "references": [
     { "path": "../packages/harness-kernel" },
     { "path": "../packages/domain/events" },
-    { "path": "../packages/harness-openbot-bridge" }
+    { "path": "../packages/domain/workers" },
+    { "path": "../packages/domain/workspace" },
+    { "path": "../packages/harness-openbot-bridge" },
+    { "path": "../packages/plugins/action-gateway" },
+    { "path": "../packages/plugins/browser-runtime" },
+    { "path": "../packages/plugins/cluster-scheduler" },
+    { "path": "../packages/plugins/context-runtime" },
+    { "path": "../packages/plugins/needle-orchestrator" },
+    { "path": "../packages/plugins/runtime-snapshots" },
+    { "path": "../packages/plugins/specialist-registry" }
   ]
 }

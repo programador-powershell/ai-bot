@@ -118,8 +118,19 @@ export interface ActionResult {
 
 /** Um pedido de aprovação que sobreviveu a um reinício — reaparece na tela. */
 export interface PendingApproval {
+  sessionId: string
   turn: string
+  /**
+   * O ts ORIGINAL do approval.request no log. É dele que o prazo continua
+   * contando depois de um reinício — o relógio da pessoa não zera porque o
+   * processo caiu; um pedido de ontem não vira pedido fresco de hoje.
+   */
+  ts: string
   request: ApprovalRequest
+  /** Os argumentos do tool.call original — o que uma decisão pós-reinício re-executa. */
+  args?: unknown
+  /** Quem assinou o tool.call original (o ator do re-efeito e do tool.result). */
+  from: Actor
 }
 
 /** O desfecho de uma chamada feita pela interface (contrato {ok, output|error}). */
@@ -286,7 +297,17 @@ export class ActionGatewayService extends Service {
     // ver digestOf. O MESMO valor viaja no tool.call e no approval.request:
     // é a igualdade dos dois lados do portão que o aceite E4 exige.
     const digest = digestOf(approvalScope(await this.#sessionCwd(sessionId), specialistId), tool, rawArgs)
-    const risk = riskOf(tool)
+    // MCP fecha para ESCRITA também no PORTÃO, não só no intent: a tabela de
+    // risco diz que `mcp.call` é rede, mas o risco REAL de uma ferramenta de
+    // terceiro é o efeito anunciado dela — e efeito que ninguém classificou
+    // como leitura é tratado como escrita (a regra E4: unknown=write). Sem
+    // isto, a política "aprovar edições" deixaria passar sem pergunta um
+    // editJiraIssue que ninguém revisou.
+    const risk: Risk = request.mcp
+      ? request.mcp.effect === 'read'
+        ? 'read'
+        : 'write'
+      : riskOf(tool)
     const subject: IntentSubject = { tool }
     if (request.key !== undefined) subject.key = request.key
     if (request.mcp !== undefined) subject.mcp = request.mcp
@@ -404,16 +425,36 @@ export class ActionGatewayService extends Service {
    */
   async pendingApprovals(sessionId: string): Promise<PendingApproval[]> {
     const pending = new Map<string, PendingApproval>()
+    // Os tool.call da sessão, por callId: são eles que carregam os ARGUMENTOS
+    // e o ATOR originais — sem eles, uma decisão pós-reinício não teria o que
+    // re-executar (o detail do cartão é truncado em 2000 e não serve de fonte).
+    const chamadas = new Map<string, { args?: unknown; from: Actor }>()
     let from = 0
     for (;;) {
       const batch = await this.#store.since(sessionId, from, MAX_EVENT_BATCH)
       if (batch.length === 0) break
       for (const envelope of batch) {
         from = envelope.seq
-        if (envelope.kind === 'approval.request') {
+        if (envelope.kind === 'tool.call') {
+          const payload = envelope.payload as ToolCall | undefined
+          if (payload?.callId) {
+            const origem: { args?: unknown; from: Actor } = { from: envelope.from }
+            if (payload.args !== undefined) origem.args = payload.args
+            chamadas.set(payload.callId, origem)
+          }
+        } else if (envelope.kind === 'approval.request') {
           const payload = envelope.payload as ApprovalRequest | undefined
           if (payload?.callId) {
-            pending.set(payload.callId, { turn: envelope.turn ?? '', request: payload })
+            const origem = chamadas.get(payload.callId)
+            const item: PendingApproval = {
+              sessionId,
+              turn: envelope.turn ?? '',
+              ts: envelope.ts,
+              request: payload,
+              from: origem?.from ?? { kind: 'system' },
+            }
+            if (origem?.args !== undefined) item.args = origem.args
+            pending.set(payload.callId, item)
           }
         } else if (envelope.kind === 'approval.decision' || envelope.kind === 'tool.result') {
           const payload = envelope.payload as { callId?: string } | undefined
@@ -423,6 +464,136 @@ export class ActionGatewayService extends Service {
       if (batch.length < MAX_EVENT_BATCH) break
     }
     return [...pending.values()]
+  }
+
+  /**
+   * [Onda 3] REARMA as aprovações pendentes depois de um reinício: para cada
+   * approval.request sem decisão e sem desfecho, volta a existir um waiter —
+   * a decisão da pessoa (decide()) funciona de novo — e um prazo que continua
+   * contando DO TS ORIGINAL: pedido que já venceu enquanto o processo estava
+   * morto é recusado agora (silêncio não vira consentimento por queda), e o
+   * que ainda não venceu ganha só o tempo que lhe restava.
+   *
+   * Uma decisão `allow` pós-reinício RE-EXECUTA a chamada: a promise original
+   * morreu com o processo, mas o tool.call durável guarda ferramenta e
+   * argumentos — aprovar significa "faça", não "fica registrado que eu teria
+   * deixado". O deny (e o prazo) fecham com tool.result, como no caminho vivo.
+   *
+   * Devolve quantos pedidos foram rearmados (diagnóstico do boot).
+   */
+  async rearmPendingApprovals(): Promise<number> {
+    const sessions = await this.#store.listSessions()
+    let rearmadas = 0
+    for (const session of sessions) {
+      for (const pending of await this.pendingApprovals(session.id)) {
+        // Já esperando (o caminho vivo desta mesma vida do processo) — não é
+        // órfão de reinício e não se rearma por cima.
+        if (this.#waiting.has(pending.request.callId)) continue
+        this.#rearmar(pending)
+        rearmadas += 1
+      }
+    }
+    return rearmadas
+  }
+
+  /** Um pedido órfão de reinício, de volta ao mapa de espera com o prazo original. */
+  #rearmar(pending: PendingApproval): void {
+    const { callId, tool } = pending.request
+    const specialistId = pending.from.specialist ?? pending.from.id ?? ''
+
+    const encerrar = (): void => {
+      this.#waiting.delete(callId)
+    }
+
+    const recusarPorPrazo = (): void => {
+      encerrar()
+      const why =
+        'ninguém decidiu dentro do prazo (contado do pedido original, através do reinício) — a execução foi recusada por segurança'
+      void this.#toolResult(pending.sessionId, pending.turn, pending.from, callId, tool, why, 0)
+        .then(() => this.#failed(pending.sessionId, pending.turn, callId, tool, why, 0))
+        .catch(() => undefined)
+    }
+
+    // O prazo REMANESCENTE do ts original. Pedido já vencido recusa agora —
+    // mas fora deste tick, para quem rearma no boot não competir com a própria
+    // subida do processo.
+    const originalMs = Date.parse(pending.ts)
+    const restanteMs = Number.isNaN(originalMs)
+      ? 0
+      : Math.max(0, originalMs + this.#approvalTimeoutMs - Date.now())
+    const timer = setTimeout(recusarPorPrazo, restanteMs)
+    // unref: um pedido rearmado não pode segurar o processo vivo sozinho.
+    timer.unref?.()
+
+    this.#waiting.set(callId, {
+      settled: false,
+      resolve: (decision) => {
+        clearTimeout(timer)
+        encerrar()
+        void this.#concluirRearmada(pending, specialistId, decision).catch(() => undefined)
+      },
+    })
+  }
+
+  /** O desfecho de uma aprovação decidida DEPOIS do reinício. */
+  async #concluirRearmada(
+    pending: PendingApproval,
+    specialistId: string,
+    decision: ApprovalDecision,
+  ): Promise<void> {
+    const { callId, tool, digest } = pending.request
+    const { sessionId, turn } = pending
+
+    // A decisão vira envelope durável ANTES de qualquer efeito — a mesma
+    // ordem do caminho vivo (tool.call → approval.request → approval.decision
+    // → efeito → tool.result), e é ela que fecha o cartão em toda tela.
+    const decisionPayload: ApprovalDecision = { callId, allow: decision.allow }
+    if (decision.scope !== undefined) decisionPayload.scope = decision.scope
+    if (decision.comment !== undefined) decisionPayload.comment = decision.comment
+    await this.#append(sessionId, turn, 'approval.decision', { kind: 'user' }, decisionPayload)
+
+    if (!decision.allow) {
+      const comment = decision.comment?.trim() ?? ''
+      const why = comment !== '' ? comment : 'a pessoa recusou a execução'
+      await this.#toolResult(sessionId, turn, pending.from, callId, tool, why, 0)
+      this.#failed(sessionId, turn, callId, tool, why, 0)
+      return
+    }
+
+    // Allow: a concessão vale como no caminho vivo (mesmo escopo, mesmo
+    // digest) e a chamada RODA — com os argumentos do tool.call durável.
+    // Digest ausente no pedido antigo não vira concessão: o grant com digest
+    // vazio não guarda nada (o cheque em branco por nome continua fechado).
+    this.gate.grant(decision.scope ?? '', specialistId, tool, digest ?? '')
+    const started = Date.now()
+    let output: string
+    try {
+      output = await this.#tools.call(sessionId, tool, pending.args)
+    } catch (error) {
+      const elapsed = Date.now() - started
+      const message = error instanceof Error ? error.message : String(error)
+      await this.#toolResult(sessionId, turn, pending.from, callId, tool, message, elapsed)
+      this.#failed(sessionId, turn, callId, tool, message, elapsed)
+      return
+    }
+    const elapsed = Date.now() - started
+
+    const projection = await projectToolOutput(this.artifacts, sessionId, tool, output)
+    const projected = truncate(projection.projected, 20000)
+    const resultPayload: ToolResult = { callId, tool, ok: true, elapsedMs: elapsed }
+    if (projected !== '') resultPayload.output = projected
+    if (projection.truncated) resultPayload.truncated = true
+    if (projection.ref !== '') resultPayload.artifactRef = projection.ref
+    if (projection.rawBytes > 0) resultPayload.rawBytes = projection.rawBytes
+    await this.#append(sessionId, turn, 'tool.result', pending.from, resultPayload)
+
+    const succeeded: ActionOutcomeEvent = {
+      sessionId, turn, callId, tool, ok: true, elapsedMs: elapsed,
+    }
+    if (projection.ref !== '') succeeded.artifactRef = projection.ref
+    if (projection.rawBytes > 0) succeeded.rawBytes = projection.rawBytes
+    if (projection.truncated) succeeded.truncated = true
+    this.ctx.emit('action.succeeded', succeeded)
   }
 
   /** Publica o pedido e espera a decisão humana. */

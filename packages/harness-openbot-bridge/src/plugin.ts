@@ -106,8 +106,9 @@ export interface TransporteConfig {
   /** 0 = porta efêmera (teste). O valor real fica em `ctx.transporte.porta`. */
   port?: number
   allowOrigins?: readonly string[]
-  specialists?: readonly string[]
-  models?: readonly Model[]
+  /** Lista fixa OU provedor vivo — ver StreamOptions (o catálogo real troca a quente). */
+  specialists?: readonly string[] | (() => readonly string[])
+  models?: readonly Model[] | (() => readonly Model[])
   environments?: ProvedorDeAmbientes
   /** Se ausente, os verbos do cliente saem como evento `openbot/inbound` do kernel. */
   onInbound?: (sessionId: string, envelope: EnvelopeDeEntrada) => void
@@ -248,8 +249,8 @@ export const transportePlugin = {
 /* ------------------------- rotas HTTP do transporte ------------------------ */
 
 export interface CatalogoDoTransporte {
-  specialists: readonly string[]
-  models: readonly Model[]
+  specialists: readonly string[] | (() => readonly string[])
+  models: readonly Model[] | (() => readonly Model[])
 }
 
 /**
@@ -264,13 +265,19 @@ export function registrarRotasDoTransporte(
   roteador: RoteadorHttp,
   catalogo: CatalogoDoTransporte,
 ): void {
+  // Contagens lidas NO ATENDIMENTO, não no registro: com o catálogo vivo
+  // (specialist-registry, overlay a quente), o health de agora responde pelo
+  // catálogo de agora.
+  const specialists =
+    typeof catalogo.specialists === 'function' ? catalogo.specialists : () => catalogo.specialists
+  const models = typeof catalogo.models === 'function' ? catalogo.models : () => catalogo.models
   roteador.rota('GET', '/health', () =>
     respondeJson(200, {
       status: 'ok',
       product: 'AI-BOT',
       protocol: VERSION,
-      specialists: catalogo.specialists.length,
-      models: catalogo.models.length,
+      specialists: specialists().length,
+      models: models().length,
     }),
   )
 }

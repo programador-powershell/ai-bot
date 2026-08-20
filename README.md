@@ -17,31 +17,27 @@ Monorepo TypeScript — OpenBot como chassis, kernel plugável clean-room, Needl
 - **Chassis do openbot forkado** (MIT, `06a1a84`): `app/` (UI React — TanStack Router/Query + Tailwind 4) e o servidor Hono fundido em `server/src/` (auth better-auth + dev-actor, audit, channels, components, computer, connectors, credentials, knowledge, plugins/MCP), com `Bun.serve` multiplexando fetch+upgrade.
 - **Uma conversa só (Onda 2):** o chassis serve o protocolo `hello/ready/replay/re-hello` pelo WS nativo do Bun em `/v1/stream`; os channels leem/escrevem o event log (a conversa É o log) e o chat do app fala o mesmo protocolo do desktop Tauri — compat dupla provada por valor contra as fixtures do oráculo Go.
 - Banco relacional do chassis em **drizzle + `bun:sqlite`** (`chassis.db`, migrações geradas) — fronteira dura com o event log (`events.db`, StorageDriver).
-- Suíte Vitest com **1293 testes** em duas invocações: núcleo + app sob Node (825), e os 468 do chassis sob o runtime Bun (`bun:sqlite`, `Bun.serve`).
+- **Governo unificado (Onda 3):** montagem COMPLETA do kernel no server de produção (os 7 plugins + seams declarados), motor de regras clean-room no action-gateway (cel-js fora do lockfile), MCP e componentes generativos entrando pelo funil (grants por chamada, unknown=write), aprovação humana durável que renasce após reinício com o prazo original, e rotas admin de auditoria sobre os envelopes.
+- Suíte Vitest com **1325 testes** em duas invocações: núcleo + app sob Node (844), e os 481 do chassis sob o runtime Bun (`bun:sqlite`, `Bun.serve`).
 
 ## :new: Releases Notes
 
-### :up: V.2.1
+### :up: V.2.2
 ### :warning: Latest Changes
 
-- **Onda 2 da integração total (docs/integracao-openbot.md §5) — uma conversa:** o chassis serve `hello/ready/replay/re-hello` pelo **WS nativo do Bun** (`Bun.serve`, `server/src/stream/`) em `/v1/stream`; as 3 invariantes de ordem do stream (E3) passam SERVIDAS PELO CHASSIS com os MESMOS testes nomeados (`server/tests/stream-invariantes.test.ts`).
-- **Compat dupla provada:** as transcrições reais do gateway Go (`test-fixtures/ws/*.jsonl`) reproduzidas por valor contra o transporte do chassis, e o teste "duas janelas" liga o hello do desktop e o do app forkado NO MESMO server recebendo a MESMA sessão (`server/tests/stream-compat.test.ts`).
-- **Channels = event log:** a conversa das threads é o log de envelopes (`server/src/channels/conversa.ts` — prompt vira `message` durável via session bus; `GET /api/threads/:id/messages` lê do replay); mapeamento thread→sessão por identidade (o chassis.db guarda só metadados); `/api/capabilities` agora anuncia `durableHistory: true` sem mentir.
-- **Chat do app religado no NOSSO protocolo:** `app/src/lib/chat/` (transporte com token no primeiro frame, resumeFrom que continua a resposta, projeção pura do replay) e a superfície `ConversaDoLog` no canal e no chat direto; `VITE_CHAT_ENABLED` agora LIGA por padrão (a flag desliga em diagnóstico).
-- **RoteadorHttp ganhou a implementação Hono** (`RoteadorHono`, produção do chassis — o `/health` do oráculo responde no processo fundido); o seam mudou para fetch e o `MiniRoteador` clean-room virou dublê de teste, com a MESMA bateria rodando nas duas implementações.
-- **Morte anunciada paga:** `@copilotkit/runtime` saiu do server (mount do Intelligence e runtime de chat mortos; `copilot.ts` ficou só com o registro de agentes); `@copilotkit/react-core` saiu do caminho da conversa (resta SÓ no preview do playground, atrás de stub com prazo final na onda 3). Decisão registrada: `@ag-ui/*` permanece como protocolo de bots EXTERNOS.
-- Contrapressão servida pelo chassis: cliente lento leva **1013** e o `resumeFrom` recompõe exatamente o que faltou (`server/tests/stream-contrapressao.test.ts`).
+- **Onda 3 da integração total (docs/integracao-openbot.md §5) — governo unificado:** o server de produção monta o kernel COMPLETO (`server/src/montagem/montagem.ts` lista os 7 plugins prontos + seams provisórios DECLARADOS em `seams.ts` — Toolbox, modelo M2 e TaskExecutor da Onda 5 falham alto com o motivo, nunca fingem), e o `ready` do stream anuncia o **catálogo REAL** do specialist-registry, lido a cada hello (overlay a quente vale na conexão seguinte).
+- **cel-js FORA do lockfile (§4.5):** o motor das regras do computer gateway é reimplementação clean-room própria (`packages/plugins/action-gateway/src/rules.ts` — parse inteiro antes de avaliar, identificador ausente falha fechado, curto-circuito absorve só erro de resolução); o envelope govern() do openbot foi mantido e a bateria de fixtures passou intacta. Política declarada TEM teste provando que é lida (`rules.test.ts`).
+- **MCP e componentes generativos pelo funil:** `/api/plugins/call`, `/api/components/:name/decision` e `/:name/call` entram pelo action-gateway (`server/src/governo/{funil,executor}.ts`) — grants por especialista conferidos POR CHAMADA, `not_granted` auditado, ferramenta MCP não classificada como leitura = ESCRITA também no risco do portão (escrita pergunta na política "aprovar edições"); o teste-espelho "efeito sem decisão do portão não executa" cobre as duas rotas (`server/tests/governo-funil.test.ts`).
+- **Aprovação durável que RENASCE:** `rearmPendingApprovals()` devolve waiter e prazo aos pedidos órfãos de reinício — o prazo continua contando do **ts original** (vencido durante a queda recusa já), decisão pós-reinício re-executa com os args do `tool.call` durável; na UI forkada o cartão (`approval-card.tsx`) é projeção do replay (`approval.request` sem decisão = cartão de novo na tela) e a decisão viaja pelo stream (`approval.decision`).
+- **Rotas de auditoria sobre os ENVELOPES** (`/api/admin/envelopes*`): sessões, replay recortado nos kinds de auditoria (tool.call/tool.result/approval.*) com payload redigido pela MESMA régua da trilha relacional, e as pendências vivas por sessão.
+- **Morte anunciada paga (prazo da Onda 2/3):** o import inerte de `@copilotkit/react-core/v2` em `chat-transcript.tsx` morreu — a linha de ferramenta do transcript é desenho próprio (`ToolLine`); o que resta de react-core é SÓ o preview do playground.
 
 ### :pushpin: Fixes
 
-- **Drain do Bun perde a borda** (Bun 1.4/Windows): `send()` feito de dentro do dispatch do callback `drain` encrava o flush do socket para sempre (buffered congela e nem polling anda). O adaptador (`conexao-bun.ts`) acorda escritores por MACROTASK e espera drenagem por polling+evento.
-- **`ws.close()` do Bun descarta o que está enfileirado** (o cliente via 1006 e perdia o prefixo): o close do adaptador drena antes de fechar (linger de 5s), preservando o contrato "prefixo contíguo, depois o close frame".
-- Envio sem conexão no chat do app não engole o Enter: o composer desliga com o aviso ao lado enquanto o status não é `ready` (a lição do desktop, por construção).
-
 ### :construction_worker: Refactors
 
-- O protocolo de stream ganhou o seam `ConexaoDeStream` (`conexao.ts`): o `StreamServer` atende qualquer transporte; o RFC 6455 clean-room (`WsConn`) virou o dublê de teste/transporte Node, como o plano §3 mandava.
-- Apoio de teste compartilhado (`teste-fixtures.ts`): fixtures do oráculo e o `StoreComGancho` com UMA definição para as duas suítes (Node e chassis).
+- `montarServidor` virou `montarNucleo` + transporte: o chassis (Bun.serve) e o sidecar Node montam o MESMO núcleo por uma lista só; o `StreamServer` e as rotas do transporte aceitam catálogo como PROVEDOR vivo (lista fixa continua valendo para teste/config estática).
+- O boot do chassis (`server/src/index.ts`) passou a receber event log e session bus do kernel (`ctx.eventos`/`ctx.sessionBus`); o encerramento desmonta pelo `dispose()` do kernel.
 
 ## :wrench: Instalação
 

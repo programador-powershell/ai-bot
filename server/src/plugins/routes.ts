@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from "hono";
 import { Hono } from "hono";
 import type { AppVariables } from "../auth/guards";
 import { requireAdmin } from "../auth/guards";
+import type { FunilDoChassi } from "../governo/funil";
 import { CATALOGUE } from "./catalogue";
 import {
   CatalogueEntryUnknownError,
@@ -30,6 +31,14 @@ import {
 export function createPluginRoutes(
   store: PluginStore,
   requireUser: MiddlewareHandler<{ Variables: AppVariables }>,
+  /**
+   * [Onda 3] O funil do chassis. Presente (produção), TODA chamada de
+   * ferramenta MCP entra pelo action-gateway: Gate + envelopes duráveis +
+   * decisão humana quando o risco pede — nenhum efeito por fora. Ausente
+   * (dublês de teste do store), a rota fala com o store direto, que continua
+   * carregando grant + política + auditoria relacional.
+   */
+  funil?: FunilDoChassi,
 ) {
   const routes = new Hono<{ Variables: AppVariables }>();
 
@@ -348,9 +357,46 @@ export function createPluginRoutes(
       ref?: string;
       args?: Record<string, unknown>;
       agentId?: string;
+      /** A thread onde a chamada nasceu — os envelopes do funil moram nela. */
+      threadId?: string;
     } | null;
     if (!body?.ref || !body.agentId) {
       return context.json({ error: "A tool and a Bot are required." }, 400);
+    }
+
+    // [Onda 3] O caminho de produção: o efeito entra pelo action-gateway.
+    if (funil) {
+      const result = await funil.chamarMcp({
+        ref: body.ref,
+        args: body.args ?? {},
+        agentId: body.agentId,
+        actorId: actorEmail(context),
+        ...(body.threadId ? { threadId: body.threadId } : {}),
+      });
+      if (result.ok) {
+        let parsed: { allowed?: boolean; reason?: string; text?: string; isError?: boolean };
+        try {
+          parsed = JSON.parse(result.output ?? "{}") as typeof parsed;
+        } catch {
+          return context.json({ error: "The server did not answer.", failed: true }, 502);
+        }
+        if (parsed.allowed === false) {
+          // Recusa de grant/política do chassis (not_granted já auditado).
+          return context.json({ error: parsed.reason ?? "Refused.", rule: null }, 403);
+        }
+        return context.json({ text: parsed.text ?? "", isError: parsed.isError === true });
+      }
+      if (result.decision === "allow") {
+        // O portão deixou e o servidor de MCP falhou: não é recusa e não pode
+        // ser lida como uma — é a distinção do contrato original.
+        return context.json(
+          { error: result.error ?? "The server did not answer.", failed: true },
+          502,
+        );
+      }
+      // Recusa do PORTÃO (deny, ou ask sem sim da pessoa) — o teste-espelho:
+      // sem decisão do portão, o efeito não executou.
+      return context.json({ error: result.error ?? "Refused.", rule: null }, 403);
     }
 
     try {

@@ -118,3 +118,100 @@ describe("streaming (delta → message final)", () => {
     expect(estado).toEqual(CONVERSA_VAZIA);
   });
 });
+
+/**
+ * [Onda 3] O cartão de aprovação como PROJEÇÃO DO REPLAY: é exatamente isto
+ * que faz a pendência RENASCER depois de um reinício do server — o log é
+ * durável, o replay reentrega o approval.request, e sem decisão nem desfecho
+ * o cartão volta à tela com o ts ORIGINAL (de onde o prazo continua contando).
+ */
+describe("aprovação pendente (replay → cartão)", () => {
+  const TS_ORIGINAL = "2026-08-20T12:00:00.000Z";
+
+  const pedido = (callId = "c-1"): Envelope => ({
+    v: 1,
+    id: `e-req-${callId}`,
+    ts: TS_ORIGINAL,
+    seq: 3,
+    session: "s1",
+    turn: "t-1",
+    kind: "approval.request",
+    from: { kind: "specialist", specialist: "code" },
+    payload: {
+      callId,
+      tool: "fs.write",
+      risk: "write",
+      summary: "fs.write: deploy/ci.yml",
+      detail: '{"path":"deploy/ci.yml"}',
+      digest: "abcd1234abcd1234",
+    },
+  });
+
+  it("approval.request sem decisão vira cartão, com o ts original para o prazo", () => {
+    const estado = aplicarEnvelope(CONVERSA_VAZIA, pedido());
+    expect(estado.aprovacoes).toHaveLength(1);
+    expect(estado.aprovacoes[0]).toMatchObject({
+      callId: "c-1",
+      tool: "fs.write",
+      risk: "write",
+      summary: "fs.write: deploy/ci.yml",
+      // O prazo da tela conta DESTE ts — nunca do momento do replay.
+      ts: TS_ORIGINAL,
+    });
+  });
+
+  it("replay repetido (reinício/reconexão) não duplica o cartão — a identidade é o callId", () => {
+    let estado = aplicarEnvelope(CONVERSA_VAZIA, pedido());
+    estado = aplicarEnvelope(estado, pedido());
+    expect(estado.aprovacoes).toHaveLength(1);
+  });
+
+  it("approval.decision fecha o cartão", () => {
+    let estado = aplicarEnvelope(CONVERSA_VAZIA, pedido());
+    estado = aplicarEnvelope(estado, {
+      v: 1,
+      id: "e-dec",
+      ts: new Date().toISOString(),
+      seq: 4,
+      session: "s1",
+      turn: "t-1",
+      kind: "approval.decision",
+      from: { kind: "user" },
+      payload: { callId: "c-1", allow: true, scope: "once" },
+    });
+    expect(estado.aprovacoes).toHaveLength(0);
+  });
+
+  it("tool.result também fecha (o timeout do servidor recusa por tool.result)", () => {
+    let estado = aplicarEnvelope(CONVERSA_VAZIA, pedido());
+    estado = aplicarEnvelope(estado, {
+      v: 1,
+      id: "e-res",
+      ts: new Date().toISOString(),
+      seq: 5,
+      session: "s1",
+      turn: "t-1",
+      kind: "tool.result",
+      from: { kind: "specialist", specialist: "code" },
+      payload: { callId: "c-1", tool: "fs.write", ok: false, error: "prazo" },
+    });
+    expect(estado.aprovacoes).toHaveLength(0);
+  });
+
+  it("a sequência inteira de um reinício: request → (replay) → request → decision = tela limpa", () => {
+    const decisao: Envelope = {
+      v: 1,
+      id: "e-dec-2",
+      ts: new Date().toISOString(),
+      seq: 6,
+      session: "s1",
+      turn: "t-1",
+      kind: "approval.decision",
+      from: { kind: "user" },
+      payload: { callId: "c-1", allow: false },
+    };
+    // O reinício reentrega o pedido (log durável) e a decisão vem depois.
+    const estado = [pedido(), pedido(), decisao].reduce(aplicarEnvelope, CONVERSA_VAZIA);
+    expect(estado.aprovacoes).toHaveLength(0);
+  });
+});

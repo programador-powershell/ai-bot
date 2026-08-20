@@ -47,8 +47,13 @@ export interface OpcoesDoStreamDoChassi {
   /** O segredo do hello. Obrigatório — o StreamServer recusa vazio na subida. */
   token: string;
   allowOrigins?: readonly string[];
-  specialists?: readonly string[];
-  models?: readonly Model[];
+  /**
+   * [Onda 3] O catálogo que o ready anuncia — de preferência um PROVEDOR vivo
+   * apontando para o specialist-registry montado no kernel (o catálogo REAL,
+   * que troca a quente), nunca uma lista copiada na subida.
+   */
+  specialists?: readonly string[] | (() => readonly string[]);
+  models?: readonly Model[] | (() => readonly Model[]);
   environments?: ProvedorDeAmbientes;
   /** Os verbos do cliente (prompt, decisões…). Quem interpreta é o dono do funil. */
   onInbound?: (sessionId: string, envelope: EnvelopeDeEntrada) => void;

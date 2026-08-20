@@ -1,20 +1,25 @@
 /**
  * Whether a Bot may take one particular action on one particular page.
  *
- * Mirrors the policy engine in CopilotKit's enterprise agent gateway rather than being re-derived, so
- * a rule written here means the same thing there. Kept from it: CEL expressions, `dry-run` vs
- * `enforce`, default-deny, and fail-closed evaluation. Added here: a `deny` list, because an
- * allow-only policy can only forbid one thing by withdrawing permission from everything.
+ * A FORMA veio do policy engine do chassis openbot (deny/allow em expressões,
+ * `dry-run` vs `enforce`, default-deny, avaliação fail-closed — e a lista
+ * `deny`, que o original não tinha). O MOTOR, desde a Onda 3, é o NOSSO:
+ * `evaluateRule` do @aibot2/plugin-action-gateway — o mesmo pacote que carrega
+ * o Gate de permissões portado do gateway Go. cel-js saiu do lockfile (§4.5):
+ * dois motores de política é o cenário I4 (duas verdades), e o último degrau
+ * antes do efeito não roda parser de terceiro que ninguém daqui audita.
  *
- * CEL instead of a rule table. The boundary a company wants is a sentence: "never click anything
- * that says Submit on a page outside our own domain". A table of columns can express the shapes we
- * thought of; an expression language can express the one they thought of. This is also the language
- * the enterprise gateway already speaks, so a rule written here means the same thing there.
+ * Expressão em vez de tabela de colunas, ainda assim: o limite que uma empresa
+ * quer é uma frase ("nunca clique em nada que diga Submit fora do nosso
+ * domínio"), e uma tabela só expressa as formas que nós antecipamos. O
+ * subconjunto aceito (==, !=, &&, ||, !, contains, matches, caminhos) está
+ * declarado no motor — regra fora dele FALHA ALTO, nunca é "entendida" como
+ * outra coisa (a memória da casa: política declarada é LIDA).
  *
  * Precedence: deny beats allow. A rule that removes permission must never be
  * defeated by a broader rule that grants it, or a company cannot reason about what it has forbidden.
  */
-import { evaluate } from "cel-js";
+import { evaluateRule } from "@aibot2/plugin-action-gateway";
 
 export type PolicyMode = "dry-run" | "enforce";
 
@@ -147,33 +152,10 @@ export type PolicyDecision = {
 };
 
 /**
- * String helpers, registered as CEL globals.
- *
- * cel-js 0.8.2 implements no string methods at all: `element.name.contains("Submit")` raises
- * "Unknown method: contains", as do `startsWith`, `endsWith` and `matches`. These globals make
- * substring rules enforceable with the installed CEL version.
- *
- * Both are case-insensitive. A rule saying "never click submit" also catches a button labelled
- * "SUBMIT".
- */
-const POLICY_FUNCTIONS: Record<string, (...args: never[]) => unknown> = {
-  contains: ((haystack: unknown, needle: unknown) =>
-    String(haystack).toLowerCase().includes(String(needle).toLowerCase())) as (
-    ...args: never[]
-  ) => unknown,
-  matches: ((value: unknown, pattern: unknown) => {
-    try {
-      return new RegExp(String(pattern), "i").test(String(value));
-    } catch {
-      // An unparseable regex is a broken rule, not a match. The caller treats a thrown expression as
-      // fail-closed, so returning false here would quietly weaken a deny rule; throw instead.
-      throw new Error(`not a valid pattern: ${String(pattern)}`);
-    }
-  }) as (...args: never[]) => unknown,
-};
-
-/**
  * Evaluate one expression. Never throws.
+ *
+ * `contains` e `matches` são embutidos do motor (caso-insensíveis por
+ * contrato — a regra "nunca clique em submit" pega o botão "SUBMIT").
  *
  * `onError` decides what a broken expression means, because the safe answer differs by list: a broken
  * `allow` must not permit, and a broken `deny` must not stop denying. Both are logged loudly, because
@@ -186,11 +168,8 @@ function matches(
 ): boolean {
   try {
     return (
-      evaluate(
-        expression,
-        context as unknown as Record<string, unknown>,
-        POLICY_FUNCTIONS as Record<string, CallableFunction>,
-      ) === true
+      evaluateRule(expression, context as unknown as Record<string, unknown>) ===
+      true
     );
   } catch (error) {
     console.error(

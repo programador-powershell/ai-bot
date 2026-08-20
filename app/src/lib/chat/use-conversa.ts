@@ -64,6 +64,13 @@ export type ConversaDoLog = {
   indisponivel: boolean;
   /** Envia o prompt pelo protocolo. false = offline (o composer desenha isso). */
   enviar(texto: string): boolean;
+  /**
+   * [Onda 3] Decide um cartão de aprovação pendente. O verbo viaja pelo MESMO
+   * stream (o funil do servidor grava approval.decision durável e executa —
+   * ou recusa). false = offline; o cartão fica na tela e a pessoa tenta de
+   * novo quando reconectar — silêncio nunca vira consentimento.
+   */
+  decidir(callId: string, allow: boolean, scope?: "once" | "digest" | "session"): boolean;
 };
 
 export function useConversaDoLog(threadId: string | undefined): ConversaDoLog {
@@ -141,6 +148,18 @@ export function useConversaDoLog(threadId: string | undefined): ConversaDoLog {
       // ainda é da onda 3, e um spinner sem ninguém do outro lado seria
       // degraded-mode fingido.
       return transporteRef.current?.send("prompt", { text: limpo }) ?? false;
+    },
+    decidir(callId: string, allow: boolean, scope?: "once" | "digest" | "session"): boolean {
+      if (callId.trim() === "") return false;
+      return (
+        transporteRef.current?.send("approval.decision", {
+          callId,
+          allow,
+          // "once" é o padrão do lado do servidor também: resposta pontual não
+          // vira regra sem a pessoa pedir.
+          scope: scope ?? "once",
+        }) ?? false
+      );
     },
   };
 }

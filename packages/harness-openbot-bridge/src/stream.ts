@@ -124,10 +124,15 @@ export interface StreamOptions {
   token: string
   /** Origens de navegador aceitas no handshake (ver checkOrigin em ws.ts). */
   allowOrigins?: readonly string[]
-  /** A lista de especialistas que vai no ready — e que valida o dono de sessão nova. */
-  specialists?: readonly string[]
-  /** O catálogo de modelos que vai no ready. */
-  models?: readonly Model[]
+  /**
+   * A lista de especialistas que vai no ready — e que valida o dono de sessão
+   * nova. [Onda 3] Aceita também um PROVEDOR (função), porque o catálogo real
+   * mora no specialist-registry e troca A QUENTE (overlay publicado): uma
+   * cópia tirada na subida anunciaria para sempre o catálogo do boot.
+   */
+  specialists?: readonly string[] | (() => readonly string[])
+  /** O catálogo de modelos que vai no ready — mesmo contrato de provedor. */
+  models?: readonly Model[] | (() => readonly Model[])
   environments?: ProvedorDeAmbientes
   /**
    * Para onde vão os verbos do cliente (prompt, decisões…). O transporte NÃO
@@ -159,8 +164,9 @@ export class StreamServer {
   readonly #bus: SessionBus
   readonly #token: Buffer
   readonly #allowOrigins: readonly string[]
-  readonly #specialists: readonly string[]
-  readonly #models: readonly Model[]
+  /** Sempre funções por dentro: lista fixa vira provedor constante na subida. */
+  readonly #specialists: () => readonly string[]
+  readonly #models: () => readonly Model[]
   readonly #ambientes: ProvedorDeAmbientes
   readonly #onInbound: (sessionId: string, envelope: EnvelopeDeEntrada) => void
   readonly #helloTimeoutMs: number
@@ -186,8 +192,8 @@ export class StreamServer {
     this.#bus = options.bus
     this.#token = Buffer.from(options.token, 'utf8')
     this.#allowOrigins = options.allowOrigins ?? []
-    this.#specialists = options.specialists ?? []
-    this.#models = options.models ?? []
+    this.#specialists = comoProvedor(options.specialists ?? [])
+    this.#models = comoProvedor(options.models ?? [])
     this.#ambientes = options.environments ?? (() => ({}))
     this.#onInbound = options.onInbound ?? (() => {})
     this.#helloTimeoutMs = options.helloTimeoutMs ?? HELLO_DEADLINE_MS
@@ -497,8 +503,10 @@ export class StreamServer {
     const payload: Ready = {
       session: sessionId,
       seq: lastSeq,
-      specialists: [...this.#specialists],
-      models: [...this.#models],
+      // Lidos do PROVEDOR a cada ready: o catálogo real (registry) troca a
+      // quente, e o que a tela recebe é o de agora — não o do boot.
+      specialists: [...this.#specialists()],
+      models: [...this.#models()],
       // Os opcionais espelham os omitempty do Go: ausente e vazio são a mesma coisa.
       ...(meta.specialist !== undefined && meta.specialist !== ''
         ? { activeSpecialist: meta.specialist }
@@ -577,7 +585,7 @@ export class StreamServer {
     // conversa nasce do bot e o primeiro pedido vai direto a ele em vez de
     // descer a cascata.
     const especialista =
-      dono !== undefined && this.#specialists.includes(dono) ? dono : ''
+      dono !== undefined && this.#specialists().includes(dono) ? dono : ''
     return this.#store.createSession({
       id: this.#idFactory('s'),
       ...(especialista !== '' ? { specialist: especialista } : {}),
@@ -779,6 +787,16 @@ function recusarUpgrade(socket: Duplex, status: 400 | 403): void {
 
 function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro)
+}
+
+/**
+ * Normaliza lista-ou-provedor para provedor. A lista fixa vira uma função
+ * constante — por dentro do servidor só existe UM jeito de perguntar pelo
+ * catálogo, e o chamador escolhe se a resposta é viva (registry) ou congelada
+ * (teste, config estática).
+ */
+function comoProvedor<T>(valor: readonly T[] | (() => readonly T[])): () => readonly T[] {
+  return typeof valor === 'function' ? valor : () => valor
 }
 
 /** Header do node:http pode vir repetido; para o log de origem vale o primeiro. */

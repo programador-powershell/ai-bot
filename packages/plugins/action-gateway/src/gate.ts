@@ -628,6 +628,13 @@ const RISK_BY_TOOL: ReadonlyMap<string, Risk> = new Map<string, Risk>([
   ['finetune.status', 'read'],
   ['schedule.list', 'read'],
   ['pack.list', 'read'],
+  // [Onda 3] Componentes generativos pelo funil: a DECISÃO por render e a
+  // leitura de dados do componente são leituras (as data functions leem a
+  // própria trilha de auditoria do deployment). O que cada bot PODE renderizar
+  // ou ler continua sendo o grant por especialista, conferido POR CHAMADA no
+  // executor — esta linha só diz que o gesto não altera nem executa nada.
+  ['component.render', 'read'],
+  ['component.data', 'read'],
 
   // Deixa rastro: arquivo novo, arquivo alterado, worktree criada, commit
   // feito. image.generate está aqui porque termina em arquivo no disco.

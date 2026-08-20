@@ -1,5 +1,6 @@
 import type { Message } from "@ag-ui/core";
 import { type ReactNode, useEffect } from "react";
+import { ApprovalCard } from "@/components/channels/approval-card";
 import { ConversationView } from "@/components/channels/conversation-view";
 import type {
   AgentOption,
@@ -57,6 +58,28 @@ export function ConversaDoLog({
     registrarEnviar?.(conversa.enviar);
   });
 
+  /*
+   * [Onda 3] Os cartões de aprovação vivos, ACIMA do composer: é onde a
+   * pessoa está olhando quando o bot pede licença, e é a projeção do replay —
+   * um cartão que sobreviveu a um reinício do server volta sozinho aqui, com
+   * o prazo contando do pedido original.
+   */
+  const cartoes =
+    conversa.estado.aprovacoes.length > 0 ? (
+      <div>
+        {conversa.estado.aprovacoes.map((aprovacao) => (
+          <ApprovalCard
+            aprovacao={aprovacao}
+            disabled={conversa.status !== "ready"}
+            key={aprovacao.callId}
+            onDecide={(allow, scope) => {
+              conversa.decidir(aprovacao.callId, allow, scope);
+            }}
+          />
+        ))}
+      </div>
+    ) : null;
+
   const aviso = conversa.indisponivel ? (
     <p className="pb-2 text-sm text-destructive" role="alert">
       A conversa não pôde ser aberta: o servidor não entregou o acesso ao
@@ -81,7 +104,14 @@ export function ConversaDoLog({
       // fala em vez de engolir o Enter"), resolvida aqui por construção.
       disabled={disabled || conversa.indisponivel || conversa.status !== "ready"}
       messages={comoMessages(conversa.estado.mensagens)}
-      notice={aviso}
+      notice={
+        cartoes !== null || aviso !== null ? (
+          <>
+            {cartoes}
+            {aviso}
+          </>
+        ) : null
+      }
       onSubmit={(draft: ComposerDraft) => {
         const mandou = conversa.enviar(draft.text);
         if (mandou) onSaid?.(draft.text.trim());

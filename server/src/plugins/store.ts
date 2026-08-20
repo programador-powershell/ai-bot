@@ -724,6 +724,42 @@ export function createPluginStore(options: PluginStoreOptions) {
     },
 
     /**
+     * [Onda 3] Decompõe um ref em {server, tool, effect} para o FUNIL — o
+     * action-gateway precisa do efeito ANTES de decidir (unknown=write vira
+     * risco de escrita no portão), e o nome da ferramenta nunca é fonte de
+     * efeito. Ref malformado ou servidor desconhecido caem em `write`: o que
+     * não é positivamente uma leitura é tratado como escrita.
+     */
+    async classify(
+      ref: string,
+    ): Promise<{ server: string; tool: string; effect: "read" | "write" }> {
+      const [serverId, ...rest] = ref.split("/");
+      const toolName = rest.join("/");
+      if (!serverId || !toolName) {
+        return { server: serverId ?? "", tool: toolName, effect: "write" };
+      }
+      try {
+        const { entry } = await requireServer(serverId);
+        const advertised = await database
+          .select({ name: mcpTools.name })
+          .from(mcpTools)
+          .where(
+            and(eq(mcpTools.serverId, serverId), eq(mcpTools.name, toolName)),
+          )
+          .limit(1);
+        return {
+          server: serverId,
+          tool: toolName,
+          effect: classifyTool(entry, toolName, advertised.length > 0),
+        };
+      } catch {
+        // Servidor que o deployment não conhece: nada aqui pode afirmar que a
+        // ferramenta só lê — e a recusa de verdade vem do grant, logo adiante.
+        return { server: serverId, tool: toolName, effect: "write" };
+      }
+    },
+
+    /**
      * Call a tool on somebody else's server, on a Bot's behalf.
      *
      * Decide, record, then act, which is the order the computer gateway uses and for the same

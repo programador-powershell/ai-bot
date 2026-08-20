@@ -12,14 +12,22 @@
     "typecheck": "tsc --build"
   },
   "dependencies": {
+    "@aibot2/cluster-scheduler": "workspace:*",
     "@aibot2/domain-events": "workspace:*",
+    "@aibot2/domain-workers": "workspace:*",
+    "@aibot2/domain-workspace": "workspace:*",
     "@aibot2/harness-kernel": "workspace:*",
     "@aibot2/harness-openbot-bridge": "workspace:*",
+    "@aibot2/needle-orchestrator": "workspace:*",
+    "@aibot2/plugin-action-gateway": "workspace:*",
+    "@aibot2/plugin-browser-runtime": "workspace:*",
+    "@aibot2/plugin-context-runtime": "workspace:*",
+    "@aibot2/runtime-snapshots": "workspace:*",
+    "@aibot2/specialist-registry": "workspace:*",
     "@ag-ui/client": "0.0.57",
     "@better-auth/drizzle-adapter": "^1.6.27",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-auth": "^1.6.27",
-    "cel-js": "^0.8.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.10.0",
     "yaml": "^2.9.0"
