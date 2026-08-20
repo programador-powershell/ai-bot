@@ -1,49 +1,48 @@
 /**
- * O roteador HTTP mínimo — e o SEAM para o dia em que o Hono for homologado.
+ * O seam de roteamento HTTP — e as suas DUAS implementações.
  *
- * O m1-plano citava Hono, mas hono/@hono/* aguardam parecer TI/SI e a regra da
- * casa é homologação por dependência: o transporte nasce DEP-FREE sobre
- * node:http. Este arquivo é deliberadamente pequeno porque a nossa necessidade
- * é pequena (rotas literais, sem params, sem middleware em árvore), e porque
- * ele é o que será SUBSTITUÍDO: os consumidores (plugin.ts e quem vier)
- * dependem de `RoteadorHttp`, nunca do MiniRoteador — quando/se o Hono entrar,
- * um adapter implementa a interface sobre ele e nenhuma linha de transporte
- * muda. É a mesma regra de dependência do harness: consumidor depende do seam.
+ * [Onda 2 da integração] Com o Bun 1.4 e o fork do chassis homologados, o Hono
+ * entrou (plano §4.2): `RoteadorHono` (router-hono.ts) é a implementação de
+ * PRODUÇÃO, e o `MiniRoteador` clean-room deste arquivo vira o dublê de teste
+ * — exatamente a troca que o seam existia para permitir. O contrato mudou de
+ * node:http (IncomingMessage/ServerResponse) para fetch (Request/Response) no
+ * mesmo passo, porque o chassis serve por `Bun.serve` e o Hono fala fetch
+ * nativamente; o transporte Node (plugin.ts, hoje dublê) adapta na borda dele.
  *
  * O formato dos corpos JSON (ok/fail) é o do transport/http.go do oráculo —
  * `{"error":{"code","message"}}` — porque o desktop atual já sabe ler esse
- * envelope de erro e a paridade da E9 compara telas, não gostos.
+ * envelope de erro e a paridade compara telas, não gostos.
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http'
-
-/** Um tratador de rota. Erro não capturado aqui vira 500 no despacho. */
-export type Tratador = (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+/** Um tratador de rota. Erro não capturado aqui vira 500 opaco no despacho. */
+export type Tratador = (req: Request) => Response | Promise<Response>
 
 /**
  * O seam de roteamento. É de propósito o MENOR contrato que atende o
  * transporte de hoje: registrar rota literal e despachar. Params de caminho
  * ({id}) entram aqui quando a primeira rota precisar deles — alargar o seam
- * antes da necessidade é desenhar para um Hono imaginário.
+ * antes da necessidade é desenhar para necessidades imaginárias.
  */
 export interface RoteadorHttp {
   rota(metodo: string, caminho: string, tratador: Tratador): void
   /** Despacha a requisição. A resposta SEMPRE sai daqui (404/405 inclusos). */
-  despachar(req: IncomingMessage, res: ServerResponse): Promise<void>
+  despachar(req: Request): Promise<Response>
 }
 
 /** Escreve uma resposta JSON de sucesso (a forma do `ok` do oráculo). */
-export function respondeJson(res: ServerResponse, status: number, valor: unknown): void {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(valor))
+export function respondeJson(status: number, valor: unknown): Response {
+  return new Response(JSON.stringify(valor), {
+    status,
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+  })
 }
 
-/** Escreve o envelope de erro que o desktop já sabe ler (a forma do `fail` do oráculo). */
-export function respondeErro(res: ServerResponse, status: number, code: string, message: string): void {
-  respondeJson(res, status, { error: { code, message } })
+/** O envelope de erro que o desktop já sabe ler (a forma do `fail` do oráculo). */
+export function respondeErro(status: number, code: string, message: string): Response {
+  return respondeJson(status, { error: { code, message } })
 }
 
-export interface MiniRoteadorOptions {
+export interface RoteadorOptions {
   /**
    * Origens liberadas no CORS das rotas HTTP. A MESMA lista do WebSocket, de
    * propósito: duas listas para a mesma pergunta ("essa página pode falar com
@@ -52,6 +51,35 @@ export interface MiniRoteadorOptions {
   allowOrigins?: readonly string[]
 }
 
+/** A comparação do cors do oráculo: caixa livre e barra final tolerada. */
+export function origemLiberada(origin: string, allowed: readonly string[]): boolean {
+  const alvo = origin.replace(/\/+$/, '').toLowerCase()
+  return allowed.some((candidata) => candidata.replace(/\/+$/, '').toLowerCase() === alvo)
+}
+
+/**
+ * Os cabeçalhos de CORS numa resposta já montada. Compartilhado entre as duas
+ * implementações do seam para a régua ser UMA — um MiniRoteador que liberasse
+ * uma origem que o RoteadorHono nega tornaria o dublê de teste uma mentira.
+ */
+export function aplicarCors(
+  resposta: Response,
+  origin: string | null,
+  allowOrigins: readonly string[],
+): Response {
+  if (origin === null || !origemLiberada(origin, allowOrigins)) return resposta
+  resposta.headers.set('Access-Control-Allow-Origin', origin)
+  resposta.headers.set('Vary', 'Origin')
+  resposta.headers.set('Access-Control-Allow-Headers', 'authorization, content-type, accept')
+  resposta.headers.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
+  return resposta
+}
+
+/**
+ * O roteador mínimo clean-room — hoje o DUBLÊ de teste do seam (e o roteador
+ * do transporte Node, que é ele próprio o dublê do transporte do chassis).
+ * Deliberadamente pequeno: rotas literais, sem params, sem middleware.
+ */
 export class MiniRoteador implements RoteadorHttp {
   /** `METODO caminho` → tratador. Rotas são literais e a colisão é erro de montagem. */
   readonly #rotas = new Map<string, Tratador>()
@@ -59,7 +87,7 @@ export class MiniRoteador implements RoteadorHttp {
   readonly #caminhos = new Set<string>()
   readonly #allowOrigins: readonly string[]
 
-  constructor(options?: MiniRoteadorOptions) {
+  constructor(options?: RoteadorOptions) {
     this.#allowOrigins = options?.allowOrigins ?? []
   }
 
@@ -72,53 +100,31 @@ export class MiniRoteador implements RoteadorHttp {
     this.#caminhos.add(caminho)
   }
 
-  async despachar(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async despachar(req: Request): Promise<Response> {
+    const origin = req.headers.get('origin')
+
     // CORS antes de tudo: o preflight OPTIONS não pertence a rota nenhuma.
-    const origin = primeiro(req.headers.origin)
-    if (origin !== undefined && origemLiberada(origin, this.#allowOrigins)) {
-      res.setHeader('Access-Control-Allow-Origin', origin)
-      res.setHeader('Vary', 'Origin')
-      res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type, accept')
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS')
-    }
     if (req.method === 'OPTIONS') {
-      res.writeHead(204)
-      res.end()
-      return
+      return aplicarCors(new Response(null, { status: 204 }), origin, this.#allowOrigins)
     }
 
     // Só o caminho decide a rota — query não participa do roteamento.
-    const caminho = (req.url ?? '/').split('?', 1)[0]!
-    const tratador = this.#rotas.get(`${req.method ?? 'GET'} ${caminho}`)
+    const caminho = new URL(req.url).pathname
+    const tratador = this.#rotas.get(`${req.method} ${caminho}`)
     if (tratador === undefined) {
-      if (this.#caminhos.has(caminho)) {
-        respondeErro(res, 405, 'method_not_allowed', 'método não suportado nesta rota')
-      } else {
-        respondeErro(res, 404, 'not_found', 'rota desconhecida')
-      }
-      return
+      const recusa = this.#caminhos.has(caminho)
+        ? respondeErro(405, 'method_not_allowed', 'método não suportado nesta rota')
+        : respondeErro(404, 'not_found', 'rota desconhecida')
+      return aplicarCors(recusa, origin, this.#allowOrigins)
     }
+    let resposta: Response
     try {
-      await tratador(req, res)
-    } catch (erro) {
+      resposta = await tratador(req)
+    } catch {
       // O detalhe do erro fica no processo, não na resposta: mensagem interna
       // detalhada é ajuda para quem está sondando.
-      if (!res.headersSent) {
-        respondeErro(res, 500, 'internal', 'erro interno')
-      } else {
-        res.end()
-      }
-      throw erro
+      resposta = respondeErro(500, 'internal', 'erro interno')
     }
+    return aplicarCors(resposta, origin, this.#allowOrigins)
   }
-}
-
-function primeiro(header: string | string[] | undefined): string | undefined {
-  return Array.isArray(header) ? header[0] : header
-}
-
-/** A comparação do cors do oráculo: caixa livre e barra final tolerada. */
-function origemLiberada(origin: string, allowed: readonly string[]): boolean {
-  const alvo = origin.replace(/\/+$/, '').toLowerCase()
-  return allowed.some((candidata) => candidata.replace(/\/+$/, '').toLowerCase() === alvo)
 }

@@ -15,29 +15,33 @@ Monorepo TypeScript — OpenBot como chassis, kernel plugável clean-room, Needl
 - `agent-computer`: Playwright/Chromium real com snapshot ARIA e egress anti-SSRF.
 - `worker-daemon`: daemon do PC físico com executor local e Docker (dockerode) atrás do seam `ContainerRuntime`.
 - **Chassis do openbot forkado** (MIT, `06a1a84`): `app/` (UI React — TanStack Router/Query + Tailwind 4) e o servidor Hono fundido em `server/src/` (auth better-auth + dev-actor, audit, channels, components, computer, connectors, credentials, knowledge, plugins/MCP), com `Bun.serve` multiplexando fetch+upgrade.
+- **Uma conversa só (Onda 2):** o chassis serve o protocolo `hello/ready/replay/re-hello` pelo WS nativo do Bun em `/v1/stream`; os channels leem/escrevem o event log (a conversa É o log) e o chat do app fala o mesmo protocolo do desktop Tauri — compat dupla provada por valor contra as fixtures do oráculo Go.
 - Banco relacional do chassis em **drizzle + `bun:sqlite`** (`chassis.db`, migrações geradas) — fronteira dura com o event log (`events.db`, StorageDriver).
-- Suíte Vitest com **1261 testes** em duas invocações: núcleo (os 727 de antes) + app sob Node, e os 455 do chassis sob o runtime Bun (`bun:sqlite`).
+- Suíte Vitest com **1293 testes** em duas invocações: núcleo + app sob Node (825), e os 468 do chassis sob o runtime Bun (`bun:sqlite`, `Bun.serve`).
 
 ## :new: Releases Notes
 
-### :up: V.2
+### :up: V.2.1
 ### :warning: Latest Changes
 
-- **Onda 1 da integração total (docs/integracao-openbot.md §5):** fork físico do `app/` e `server/` do openbot para dentro do repo, com as exclusões do §4.1 aplicadas no primeiro gesto (`worker/`, `supervisor/`, `agent-bot/`, `agent-langgraph/`, `spire/` e o pacote `postgres` nunca entraram).
-- DB do chassis migrado de Postgres para **drizzle + `bun:sqlite`** (§4.4): schemas pg-core→sqlite-core, migrações geradas (`server/drizzle`, aplicadas no boot), trilha de auditoria append-only por triggers, transações síncronas (callback async no driver síncrono commita antes do corpo), LISTEN/NOTIFY→anúncio in-process. Nenhuma rota Postgres viva.
-- **Mount do CopilotKit Intelligence fora do boot** (§4.6/R3): o server sobe SEM SaaS em modo `local` (variáveis `INTELLIGENCE_*` presentes derrubam o boot, em vez de passarem caladas); chat do app atrás da flag `VITE_CHAT_ENABLED` (desligada) até a onda 2 religá-lo no nosso protocolo WS.
-- Login **dev-actor** (`OPENBOT_DEV_NO_AUTH=true`) funcionando; shell autenticado do app renderiza (home, agents, admin, settings) contra o server forkado.
-- Testes do openbot portados de bun:test para **vitest** (61 arquivos); a suíte roda em duas invocações (`test:nucleo` sob Node, `test:chassis` sob Bun — `bun:sqlite` só existe no runtime Bun).
-- `bunfig.toml` com `linker = "hoisted"`: o isolated do Bun 1.4 estoura MAX_PATH do Windows neste worktree profundo (ENAMETOOLONG).
+- **Onda 2 da integração total (docs/integracao-openbot.md §5) — uma conversa:** o chassis serve `hello/ready/replay/re-hello` pelo **WS nativo do Bun** (`Bun.serve`, `server/src/stream/`) em `/v1/stream`; as 3 invariantes de ordem do stream (E3) passam SERVIDAS PELO CHASSIS com os MESMOS testes nomeados (`server/tests/stream-invariantes.test.ts`).
+- **Compat dupla provada:** as transcrições reais do gateway Go (`test-fixtures/ws/*.jsonl`) reproduzidas por valor contra o transporte do chassis, e o teste "duas janelas" liga o hello do desktop e o do app forkado NO MESMO server recebendo a MESMA sessão (`server/tests/stream-compat.test.ts`).
+- **Channels = event log:** a conversa das threads é o log de envelopes (`server/src/channels/conversa.ts` — prompt vira `message` durável via session bus; `GET /api/threads/:id/messages` lê do replay); mapeamento thread→sessão por identidade (o chassis.db guarda só metadados); `/api/capabilities` agora anuncia `durableHistory: true` sem mentir.
+- **Chat do app religado no NOSSO protocolo:** `app/src/lib/chat/` (transporte com token no primeiro frame, resumeFrom que continua a resposta, projeção pura do replay) e a superfície `ConversaDoLog` no canal e no chat direto; `VITE_CHAT_ENABLED` agora LIGA por padrão (a flag desliga em diagnóstico).
+- **RoteadorHttp ganhou a implementação Hono** (`RoteadorHono`, produção do chassis — o `/health` do oráculo responde no processo fundido); o seam mudou para fetch e o `MiniRoteador` clean-room virou dublê de teste, com a MESMA bateria rodando nas duas implementações.
+- **Morte anunciada paga:** `@copilotkit/runtime` saiu do server (mount do Intelligence e runtime de chat mortos; `copilot.ts` ficou só com o registro de agentes); `@copilotkit/react-core` saiu do caminho da conversa (resta SÓ no preview do playground, atrás de stub com prazo final na onda 3). Decisão registrada: `@ag-ui/*` permanece como protocolo de bots EXTERNOS.
+- Contrapressão servida pelo chassis: cliente lento leva **1013** e o `resumeFrom` recompõe exatamente o que faltou (`server/tests/stream-contrapressao.test.ts`).
 
 ### :pushpin: Fixes
 
-- Índice de expressão `channels_recent_activity_idx` consertado à mão na migração (o drizzle-kit serializa quebrado no dialeto sqlite) e protegido por teste.
-- Caminhos `file://` no Windows via `fileURLToPath` (o `.pathname` vinha `/C:/...` e quebrava o migrator e o tenant-package).
+- **Drain do Bun perde a borda** (Bun 1.4/Windows): `send()` feito de dentro do dispatch do callback `drain` encrava o flush do socket para sempre (buffered congela e nem polling anda). O adaptador (`conexao-bun.ts`) acorda escritores por MACROTASK e espera drenagem por polling+evento.
+- **`ws.close()` do Bun descarta o que está enfileirado** (o cliente via 1006 e perdia o prefixo): o close do adaptador drena antes de fechar (linger de 5s), preservando o contrato "prefixo contíguo, depois o close frame".
+- Envio sem conexão no chat do app não engole o Enter: o composer desliga com o aviso ao lado enquanto o status não é `ready` (a lição do desktop, por construção).
 
 ### :construction_worker: Refactors
 
-- Transações do chassis sincronizadas (profile-store, channels, tenant-package, sync-persistence) com locks FOR UPDATE/SHARE aposentados — o `BEGIN IMMEDIATE` do sqlite é a serialização.
+- O protocolo de stream ganhou o seam `ConexaoDeStream` (`conexao.ts`): o `StreamServer` atende qualquer transporte; o RFC 6455 clean-room (`WsConn`) virou o dublê de teste/transporte Node, como o plano §3 mandava.
+- Apoio de teste compartilhado (`teste-fixtures.ts`): fixtures do oráculo e o `StoreComGancho` com UMA definição para as duas suítes (Node e chassis).
 
 ## :wrench: Instalação
 

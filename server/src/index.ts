@@ -11,9 +11,21 @@
  * O restante preserva o desenho original: Bun.serve multiplexa fetch+upgrade,
  * o proxy do live screen termina a sessão aqui e disca para dentro com token.
  */
+import { join } from "node:path";
 import { serve } from "bun";
+import { SqliteEventStore } from "@aibot2/domain-events";
+import { SessionBus } from "@aibot2/harness-openbot-bridge";
 import { createAgentProfileStore } from "./agents/profile-store";
 import { createApp } from "./app";
+import { criarConversaDoCanal } from "./channels/conversa";
+import { carregarConfig as carregarConfigDoStream } from "./montagem/config";
+import {
+  CAMINHO_DO_STREAM,
+  TETO_DE_CONTRAPRESSAO_BYTES,
+  criarStreamDoChassi,
+  ehStreamDoChassi,
+  type DadosDoStreamDoChassi,
+} from "./stream/transporte";
 import { createAuditReader, createAuditStore, recordAuditEvent } from "./audit";
 import { createAuth } from "./auth";
 import { DEV_ACTOR, initializeDevActorUser } from "./auth/dev-actor";
@@ -88,6 +100,44 @@ const identifyUser = async (request: Request) => {
 
 const config = loadConfig();
 const port = Number.parseInt(process.env.PORT ?? "3001", 10);
+
+/*
+ * [Onda 2] A CONVERSA do chassis: o event log (events.db, StorageDriver sobre
+ * node:sqlite — NUNCA drizzle, fronteira do §4.4) + o session bus + o stream
+ * hello/ready/replay servido pelo WS nativo do Bun. A config é a MESMA do
+ * transporte de referência (AIBOT_DATA_DIR/AIBOT_TOKEN/AIBOT_ALLOW_ORIGINS,
+ * token materializado no primeiro boot): é o que deixa o desktop Tauri atual e
+ * o app forkado discarem O MESMO server com o mesmo segredo (compat dupla).
+ */
+const configDoStream = carregarConfigDoStream();
+const eventLog = SqliteEventStore.open(join(configDoStream.dataDir, "events.db"));
+const sessionBus = new SessionBus(eventLog);
+const conversa = criarConversaDoCanal(eventLog, sessionBus);
+const streamDoChassi = criarStreamDoChassi({
+  store: eventLog,
+  bus: sessionBus,
+  token: configDoStream.token,
+  allowOrigins: configDoStream.allowOrigins,
+  // O funil de entrada da onda 2: prompt vira envelope durável no log. As
+  // decisões/aprovações entram no funil do action-gateway na onda 3.
+  onInbound: (sessionId, envelope) => {
+    void conversa.receberDoTransporte(sessionId, envelope).catch((erro) => {
+      console.error(
+        JSON.stringify({
+          type: "stream-inbound",
+          message: erro instanceof Error ? erro.message : String(erro),
+          note: "Um prompt que não pôde ser gravado NÃO vira resposta fantasma; o cliente reenvia.",
+        }),
+      );
+    });
+  },
+  log: (mensagem, campos) => {
+    // Campos sensíveis nunca chegam aqui — o transporte loga TAMANHOS de
+    // token, nunca o valor (a mesma régua do transporte de referência).
+    console.warn(`[stream] ${mensagem}`, campos ?? "");
+  },
+});
+
 const database = createDatabase(config.databaseUrl);
 // Migrações geradas, aplicadas no boot: um deployment novo começa do zero e o
 // schema que vale é o gerado — nunca DDL improvisada (§4.4).
@@ -324,6 +374,11 @@ const app = createApp(
   sandboxedStore,
   // How a thread that has no channel is named, so the direct Bot chat is in the same namespace.
   threadIdentity,
+  // [Onda 2] A conversa é o event log: as rotas de thread leem do replay.
+  conversa,
+  // [Onda 2] O token do stream para o navegador autenticado — o hello continua
+  // sendo quem autentica o socket (token no primeiro frame, nunca na URL).
+  { token: configDoStream.token, path: CAMINHO_DO_STREAM },
 );
 
 /**
@@ -357,13 +412,15 @@ const streamPathBotId = (pathname: string): string | null => {
 type StreamData = { upstream: string; inward?: WebSocket };
 
 /**
- * Bun takes exactly one WebSocket handler for the server, and two features need one: the app proxies
- * the computer stream, and it pushes channel activity through Hono's adapter. So this one
- * dispatches on what the upgrade attached, a proxy socket carries `upstream`, a Hono socket does
- * not, rather than either feature quietly taking the slot and breaking the other on connect.
+ * Bun takes exactly one WebSocket handler for the server, and THREE features need one: the app
+ * proxies the computer stream, it pushes channel activity through Hono's adapter, and [Onda 2] o
+ * transporte da CONVERSA (hello/ready/replay em /v1/stream) fala pelo WS nativo. So this one
+ * dispatches on what the upgrade attached — a proxy socket carries `upstream`, o nosso stream
+ * carrega o marcador `streamDoChassi`, a Hono socket carries neither — rather than any feature
+ * quietly taking the slot and breaking the others on connect.
  */
 type ChannelSocket = Parameters<typeof channelSocket.open>[0];
-type SocketData = StreamData | ChannelSocket["data"];
+type SocketData = StreamData | DadosDoStreamDoChassi | ChannelSocket["data"];
 
 const isProxiedStream = (data: SocketData): data is StreamData =>
   typeof (data as StreamData).upstream === "string";
@@ -374,8 +431,93 @@ const asChannelSocket = (ws: { data: SocketData }) =>
 
 serve<SocketData>({
   port,
+  websocket: {
+    // Teto de fila por socket ALTO de propósito: quem desconecta cliente lento
+    // é o barramento (folga → atrasado → 1013 → replay), nunca um descarte
+    // mudo de frame no transporte — buraco no meio do stream é o defeito que o
+    // protocolo existe para impedir.
+    backpressureLimit: TETO_DE_CONTRAPRESSAO_BYTES,
+    open(ws) {
+      if (ehStreamDoChassi(ws.data)) {
+        streamDoChassi.aoAbrir(ws as Parameters<typeof streamDoChassi.aoAbrir>[0]);
+        return;
+      }
+      if (!isProxiedStream(ws.data)) {
+        channelSocket.open(asChannelSocket(ws));
+        return;
+      }
+      const inward = new WebSocket(ws.data.upstream);
+      ws.data.inward = inward;
+      // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
+      // should be dropped, not queued, because a stale frame is worse than a missing one.
+      inward.onmessage = (event) => {
+        try {
+          ws.send(String(event.data));
+        } catch {
+          inward.close();
+        }
+      };
+      inward.onclose = () => ws.close();
+      inward.onerror = () => ws.close();
+    },
+    message(ws, raw) {
+      if (ehStreamDoChassi(ws.data)) {
+        streamDoChassi.aoReceber(
+          ws as Parameters<typeof streamDoChassi.aoReceber>[0],
+          typeof raw === "string" ? raw : Buffer.from(raw as Uint8Array),
+        );
+        return;
+      }
+      if (!isProxiedStream(ws.data)) {
+        channelSocket.message(asChannelSocket(ws), raw);
+        return;
+      }
+      if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
+    },
+    close(ws, code, reason) {
+      if (ehStreamDoChassi(ws.data)) {
+        streamDoChassi.aoFechar(
+          ws as Parameters<typeof streamDoChassi.aoFechar>[0],
+          code,
+          reason,
+        );
+        return;
+      }
+      if (!isProxiedStream(ws.data)) {
+        channelSocket.close(asChannelSocket(ws), code, reason);
+        return;
+      }
+      ws.data.inward?.close();
+    },
+    drain(ws) {
+      // Só o nosso stream escreve com contrapressão consciente; os outros
+      // donos do slot não esperam drain.
+      if (ehStreamDoChassi(ws.data)) {
+        streamDoChassi.aoDrenar(ws as Parameters<typeof streamDoChassi.aoDrenar>[0]);
+      }
+    },
+  },
   async fetch(request, server) {
     const url = new URL(request.url);
+
+    // [Onda 2] O upgrade da CONVERSA vem antes de tudo: /v1/stream é o mesmo
+    // caminho que o desktop já disca no gateway Go — compat dupla exige o
+    // mesmo endereço, o mesmo hello e a mesma régua de origem.
+    if (
+      url.pathname === CAMINHO_DO_STREAM &&
+      request.headers.get("upgrade")?.toLowerCase() === "websocket"
+    ) {
+      return streamDoChassi.upgrade(request, server) as Response;
+    }
+
+    // As rotas HTTP do transporte (o /health do oráculo) respondem ANTES do
+    // app forkado: é o RoteadorHono (implementação de produção do seam) — e o
+    // /health que o desktop conhece vence o do openbot no processo fundido.
+    const respostaDoTransporte = await streamDoChassi.roteador.despacharSeSua(request);
+    if (respostaDoTransporte !== undefined) {
+      return respostaDoTransporte;
+    }
+
     const streamBotId = streamPathBotId(url.pathname);
     if (
       streamBotId !== null &&
@@ -416,41 +558,6 @@ serve<SocketData>({
     }
     return app.fetch(request, { server });
   },
-  websocket: {
-    open(ws) {
-      if (!isProxiedStream(ws.data)) {
-        channelSocket.open(asChannelSocket(ws));
-        return;
-      }
-      const inward = new WebSocket(ws.data.upstream);
-      ws.data.inward = inward;
-      // Frames outward, input inward. Buffered by neither side: a frame the browser is too slow for
-      // should be dropped, not queued, because a stale frame is worse than a missing one.
-      inward.onmessage = (event) => {
-        try {
-          ws.send(String(event.data));
-        } catch {
-          inward.close();
-        }
-      };
-      inward.onclose = () => ws.close();
-      inward.onerror = () => ws.close();
-    },
-    message(ws, raw) {
-      if (!isProxiedStream(ws.data)) {
-        channelSocket.message(asChannelSocket(ws), raw);
-        return;
-      }
-      if (ws.data.inward?.readyState === 1) ws.data.inward.send(String(raw));
-    },
-    close(ws, code, reason) {
-      if (!isProxiedStream(ws.data)) {
-        channelSocket.close(asChannelSocket(ws), code, reason);
-        return;
-      }
-      ws.data.inward?.close();
-    },
-  },
 });
 
 if (config.devNoAuth) {
@@ -461,12 +568,17 @@ if (config.devNoAuth) {
   );
 }
 
-// [R2] O listener do Postgres saiu com o Postgres; não há conexão de longa
-// vida a soltar no encerramento — os sinais só encerram o processo.
+// [R2] O listener do Postgres saiu com o Postgres. [Onda 2] O que o
+// encerramento agora deve é ao STREAM: fechar os WS vivos com 1001 (o cliente
+// sabe que deve reconectar com resumeFrom) e soltar o event log — no Windows,
+// um handle de sqlite aberto prende o arquivo.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    process.exit(0);
+    streamDoChassi.fecharTodas();
+    void eventLog.close().finally(() => process.exit(0));
   });
 }
 
-console.info(`AI-BOT 2 server (chassis openbot) listening on http://localhost:${port}`);
+console.info(
+  `AI-BOT 2 server (chassis openbot) listening on http://localhost:${port} — stream em ${CAMINHO_DO_STREAM}, event log em ${join(configDoStream.dataDir, "events.db")}`,
+);

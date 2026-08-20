@@ -12,6 +12,7 @@ import {
   requireAdmin,
 } from "./auth/guards";
 import type { ChannelEventHub } from "./channels/events";
+import type { ConversaDoCanal } from "./channels/conversa";
 import { type ChannelStore, createChannelRoutes } from "./channels/routes";
 import type { ThreadIdentity } from "./channels/thread-identity";
 import { createThreadRoutes } from "./channels/thread-routes";
@@ -95,6 +96,20 @@ export function createApp(
    * says nothing about which deployment the conversation belongs to.
    */
   threadIdentity?: ThreadIdentity,
+  /**
+   * [Onda 2] A conversa como event log: a projeção de leitura das threads
+   * (replay → mensagens). Ausente deixa o mint de threads de pé e as rotas de
+   * conversa fora — um deployment sem event log não finge ter histórico.
+   */
+  conversa?: ConversaDoCanal,
+  /**
+   * [Onda 2] O acesso do NAVEGADOR ao stream: o token do transporte, servido
+   * atrás do MESMO session guard das outras rotas. O desktop o lê do disco
+   * (DataDir do gateway); o app forkado, autenticado por sessão, o pede aqui —
+   * e o hello continua sendo quem autentica o socket (token no primeiro
+   * frame, nunca na URL). Nunca vai para log.
+   */
+  streamAccess?: { token: string; path: string },
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -352,7 +367,18 @@ export function createApp(
   }
 
   if (threadIdentity) {
-    app.route("/api/threads", createThreadRoutes(threadIdentity, requireUser));
+    app.route(
+      "/api/threads",
+      createThreadRoutes(threadIdentity, requireUser, conversa),
+    );
+  }
+
+  if (streamAccess) {
+    // Só quem TEM sessão recebe o segredo do hello — é a versão navegador do
+    // "o Rust leu o arquivo do DataDir": mesma verdade, guarda equivalente.
+    app.get("/api/stream/token", requireUser, (context) =>
+      context.json({ token: streamAccess.token, path: streamAccess.path }),
+    );
   }
 
   return app;

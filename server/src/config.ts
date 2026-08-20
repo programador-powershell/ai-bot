@@ -5,9 +5,9 @@
  * CopilotKit Intelligence obrigatório, e o boot ABORTAVA sem licença. Aqui a
  * conversa é o NOSSO event log (local-first), então o modo é `local` e o boot
  * não exige licença nem endpoint de Intelligence — sem degraded-mode fingido:
- * o que este runtime diz que é, ele é. `durableHistory` nasce `false` e só
- * vira `true` na onda 2, quando os channels passarem a ler/escrever o event
- * log de verdade — anunciar antes seria mentira na /api/capabilities.
+ * o que este runtime diz que é, ele é. [Onda 2] `durableHistory` agora é
+ * `true`: os channels leem/escrevem o event log (channels/conversa.ts) e a
+ * /api/capabilities pode anunciá-lo sem mentir.
  */
 import { devAuthEnabled } from "./auth/dev-actor";
 import type { ActionPolicy } from "./computer/policy";
@@ -15,7 +15,7 @@ import { parseActionPolicy } from "./computer/policy-store";
 
 export type RuntimeCapabilities = {
   mode: "local";
-  durableHistory: false;
+  durableHistory: true;
 };
 
 export type DeploymentConfig = {
@@ -242,7 +242,10 @@ function runtimeCapabilities(environment: Environment): RuntimeCapabilities {
     );
   }
 
-  return { mode: "local", durableHistory: false };
+  // [Onda 2] durableHistory virou true DE VERDADE: os channels leem/escrevem o
+  // event log (channels/conversa.ts) e o replay reconstrói a conversa — a
+  // promessa que a onda 1 se recusou a anunciar antes de existir.
+  return { mode: "local", durableHistory: true };
 }
 
 function computerConfig(

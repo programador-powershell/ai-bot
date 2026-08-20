@@ -22,9 +22,10 @@ describe("deployment configuration", () => {
 
     expect(config.runtime).toEqual({
       mode: "local",
-      // Nasce false e só vira true na onda 2, quando os channels lerem o
-      // event log de verdade — a /api/capabilities não pode prometer antes.
-      durableHistory: false,
+      // [Onda 2] true de verdade: os channels leem/escrevem o event log
+      // (channels/conversa.ts) — a promessa que a onda 1 se recusou a
+      // anunciar antes de existir.
+      durableHistory: true,
     });
     expect(config.managedAgentAgUiUrl).toEqual(
       new URL("http://localhost:4200/ag-ui"),

@@ -19,15 +19,15 @@ describe("health endpoint", () => {
 });
 
 describe("runtime capabilities", () => {
-  // [Cirurgia §4.6 — R3] O runtime é local: a /api/capabilities diz isso e
-  // NÃO promete histórico durável antes de a onda 2 ligar o event log.
+  // [Cirurgia §4.6 — R3] O runtime é local. [Onda 2] durableHistory virou
+  // true DE VERDADE: os channels leem/escrevem o event log (conversa-log.test).
   test("reports the local runtime without exposing configuration secrets", async () => {
     const response = await app.request("http://openbot.local/api/capabilities");
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       mode: "local",
-      durableHistory: false,
+      durableHistory: true,
     });
   });
 

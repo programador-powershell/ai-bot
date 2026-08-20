@@ -49,6 +49,7 @@ import {
   type StorageDriver,
 } from '@aibot2/domain-events'
 
+import type { ConexaoDeStream } from './conexao.js'
 import { SessionBus, type Assinatura } from './eventbus.js'
 import {
   CLOSE_GOING_AWAY,
@@ -59,7 +60,6 @@ import {
   CLOSE_TRY_AGAIN_LATER,
   OP_TEXT,
   UpgradeRecusadoError,
-  WsConn,
   upgradeWebSocket,
 } from './ws.js'
 
@@ -172,7 +172,7 @@ export class StreamServer {
   readonly #log: LogDoTransporte
 
   /** Conexões vivas — para o encerramento do processo fechá-las educadamente. */
-  readonly #conexoes = new Set<WsConn>()
+  readonly #conexoes = new Set<ConexaoDeStream>()
 
   #contadorDeIds = 0
 
@@ -212,7 +212,7 @@ export class StreamServer {
    * para o log do servidor.
    */
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-    let conn: WsConn
+    let conn: ConexaoDeStream
     try {
       conn = upgradeWebSocket(
         req,
@@ -230,10 +230,22 @@ export class StreamServer {
       recusarUpgrade(socket, status)
       return
     }
+    void this.atender(conn, { origem: primeiroHeader(req.headers.origin) })
+  }
+
+  /**
+   * [Onda 2] Atende uma conexão JÁ negociada — o seam por onde o transporte
+   * nativo do Bun (e qualquer outro que implemente ConexaoDeStream) entrega o
+   * socket ao protocolo. O handshake HTTP (origem, caminho, 101) é obrigação
+   * de quem chama; daqui para dentro valem as invariantes do stream.
+   */
+  async atender(conn: ConexaoDeStream, info?: { origem?: string | undefined }): Promise<void> {
     this.#conexoes.add(conn)
-    void this.#atender(conn, req).finally(() => {
+    try {
+      await this.#atender(conn, info?.origem)
+    } finally {
       this.#conexoes.delete(conn)
-    })
+    }
   }
 
   /** Fecha todas as conexões vivas — o caminho do encerramento do processo. */
@@ -245,7 +257,7 @@ export class StreamServer {
 
   /* ----------------------------- o protocolo ----------------------------- */
 
-  async #atender(conn: WsConn, req: IncomingMessage): Promise<void> {
+  async #atender(conn: ConexaoDeStream, origem: string | undefined): Promise<void> {
     const entrada = new FilaDeEntrada(conn)
     let assinatura: Assinatura | undefined
     let bomba: Bomba | undefined
@@ -274,7 +286,7 @@ export class StreamServer {
         // comprimento não é o segredo: separa "token vazio" (o cliente não
         // conseguiu lê-lo) de "token errado" (leu o de outra instalação).
         this.#log('handshake recusado: token não confere', {
-          origem: req.headers.origin,
+          origem,
           tamanho_recebido: Buffer.byteLength(hello.token ?? '', 'utf8'),
           tamanho_esperado: this.#token.length,
         })
@@ -339,7 +351,7 @@ export class StreamServer {
           }
           if (!this.#tokenConfere(troca.token)) {
             this.#log('troca de sessão recusada: token não confere', {
-              origem: req.headers.origin,
+              origem,
               tamanho_recebido: Buffer.byteLength(troca.token ?? '', 'utf8'),
               tamanho_esperado: this.#token.length,
             })
@@ -400,7 +412,7 @@ export class StreamServer {
    * socket, e é a diferença entre produção e consumo que enche a fila do
    * barramento e dispara o `atrasado`.
    */
-  #bombear(conn: WsConn, assinatura: Assinatura, entregueInicial: number): Bomba {
+  #bombear(conn: ConexaoDeStream, assinatura: Assinatura, entregueInicial: number): Bomba {
     let cancelada = false
     const fim = (async () => {
       let entregue = entregueInicial
@@ -451,7 +463,7 @@ export class StreamServer {
    * — o log ilegível não pode derrubar a sessão que a pessoa está abrindo;
    * erro de ESCRITA sobe, porque sem socket não há conexão a preservar.
    */
-  async #replay(conn: WsConn, sessionId: string, desde: number): Promise<number> {
+  async #replay(conn: ConexaoDeStream, sessionId: string, desde: number): Promise<number> {
     let entregue = desde
     for (;;) {
       let lote: Envelope[]
@@ -479,7 +491,7 @@ export class StreamServer {
    * Manda o `ready` da sessão — tudo o que a tela precisa para se montar sem
    * uma segunda chamada — e devolve o lastSeq que foi nele.
    */
-  async #enviarReady(conn: WsConn, sessionId: string, meta: SessionMeta): Promise<number> {
+  async #enviarReady(conn: ConexaoDeStream, sessionId: string, meta: SessionMeta): Promise<number> {
     const lastSeq = await this.#store.lastSeq(sessionId)
     const ambientes = await this.#ambientes(sessionId)
     const payload: Ready = {
@@ -591,7 +603,7 @@ export class StreamServer {
    * prazo FECHA a conexão (o cliente parou de ler; segurar a bomba por ele
    * seria deixar a memória crescer no lugar dele) e propaga o erro.
    */
-  async #escreverComPrazo(conn: WsConn, escrever: () => Promise<void>): Promise<void> {
+  async #escreverComPrazo(conn: ConexaoDeStream, escrever: () => Promise<void>): Promise<void> {
     let timer: NodeJS.Timeout | undefined
     const prazo = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -628,7 +640,7 @@ class FilaDeEntrada {
   #fim = false
   #acordar: (() => void) | undefined
 
-  constructor(conn: WsConn) {
+  constructor(conn: ConexaoDeStream) {
     conn.onmessage = (opcode, payload) => {
       // Só texto interessa ao protocolo — binário é ignorado, como o
       // `if opcode != OpText { continue }` do oráculo.
@@ -767,4 +779,9 @@ function recusarUpgrade(socket: Duplex, status: 400 | 403): void {
 
 function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro)
+}
+
+/** Header do node:http pode vir repetido; para o log de origem vale o primeiro. */
+function primeiroHeader(header: string | string[] | undefined): string | undefined {
+  return Array.isArray(header) ? header[0] : header
 }

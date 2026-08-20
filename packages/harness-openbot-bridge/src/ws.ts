@@ -23,6 +23,8 @@ import { isUtf8 } from 'node:buffer'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 
+import type { ConexaoDeStream, FimDaConexao } from './conexao.js'
+
 /** Opcodes que o servidor usa. Os reservados não aparecem de propósito: receber um deles é erro de protocolo, não um caso a tratar. */
 export const OP_TEXT = 0x1
 export const OP_BINARY = 0x2
@@ -197,13 +199,12 @@ function first(header: string | string[] | undefined): string | undefined {
   return Array.isArray(header) ? header[0] : header
 }
 
-/** O que o dono da conexão recebe quando ela acaba. `codigo` é o do frame de close, quando houve um. */
-export interface FimDaConexao {
-  codigo?: number
-  motivo?: string
-  /** Presente quando o fim foi violação de protocolo ou queda do socket, não um close educado. */
-  erro?: Error
-}
+/*
+ * [Onda 2] A forma do fim mudou de endereço: mora em conexao.ts porque agora é
+ * parte do SEAM ConexaoDeStream (o Bun também a produz). Re-exportada aqui
+ * para os importadores existentes não mudarem.
+ */
+export type { FimDaConexao } from './conexao.js'
 
 export interface WsConnOptions {
   /** Prazo entre o close e o destroy do socket (ver DEFAULT_LINGER_MS). Configurável para teste. */
@@ -221,7 +222,7 @@ export interface WsConnOptions {
  * intercala. É o que dispensa o writeMu do Go sem reabrir o bug clássico de
  * quem escreve WebSocket na mão.
  */
-export class WsConn {
+export class WsConn implements ConexaoDeStream {
   /** Mensagens completas da aplicação (texto/binário). Fragmentos nunca chegam aqui. */
   onmessage: ((opcode: number, payload: Buffer) => void) | undefined
   /** Disparado UMA vez, quando a conexão acaba (close educado, erro de protocolo ou queda). */

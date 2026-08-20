@@ -25,13 +25,20 @@ import {
 /**
  * Browser-authored components are edited as drafts, previewed in the production sandbox renderer,
  * and used by conversations only after publishing.
+ *
+ * [Onda 2] O chat religou no NOSSO protocolo, mas ESTA página continua atrás
+ * do stub: o preview usa o renderer do @copilotkit/react-core, que ficou sem
+ * provider quando o runtime morreu. É a única superfície ainda presa ao
+ * react-core — o prazo final dela é a onda 3 (o preview passa a render pelo
+ * caminho do action-gateway/gallery, e o react-core sai do lockfile do app).
  */
+const PLAYGROUND_LIGADO = false;
+
 export const Route = createFileRoute("/_authed/admin/playground")({
-  // [Onda 1 — §4.6] A pré-visualização usa o renderer do CopilotKit, que
-  // depende do provider que este boot não monta; a página volta com o chat.
-  component: chatEnabled
-    ? PlaygroundPage
-    : () => <ChatDesligado surface="O playground de componentes" />,
+  component:
+    chatEnabled && PLAYGROUND_LIGADO
+      ? PlaygroundPage
+      : () => <ChatDesligado surface="O playground de componentes" />,
 });
 
 const STARTER = {

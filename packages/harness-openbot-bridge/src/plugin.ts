@@ -13,7 +13,12 @@
  *   transporte  → provê `ctx.transporte` (HTTP + WS de pé, porta real)
  */
 
-import { createServer, type IncomingMessage, type Server as HttpServer } from 'node:http'
+import {
+  createServer,
+  type IncomingMessage,
+  type Server as HttpServer,
+  type ServerResponse,
+} from 'node:http'
 import type { Duplex } from 'node:stream'
 
 import { Service, type Context } from '@aibot2/harness-kernel'
@@ -24,7 +29,7 @@ import {
   type StorageDriver,
 } from '@aibot2/domain-events'
 
-import { MiniRoteador, respondeJson } from './router.js'
+import { MiniRoteador, respondeErro, respondeJson, type RoteadorHttp } from './router.js'
 import { SessionBus } from './eventbus.js'
 import {
   StreamServer,
@@ -174,18 +179,13 @@ export const transportePlugin = {
   inject: ['eventos', 'sessionBus'] as const,
   provide: ['transporte'] as const,
   async apply(ctx: Context, config: TransporteConfig): Promise<void> {
+    // [Onda 2] O MiniRoteador aqui é coerência de papel: este transporte Node
+    // inteiro virou o dublê do transporte do chassis (Bun.serve + RoteadorHono)
+    // — dublê usa dublê, produção usa produção, e o seam é o mesmo.
     const roteador = new MiniRoteador({ allowOrigins: config.allowOrigins ?? [] })
-
-    // A rota de saúde do oráculo, na mesma forma: contagens, nunca conteúdo —
-    // um health não autenticado não pode listar o catálogo de ninguém.
-    roteador.rota('GET', '/health', (_req, res) => {
-      respondeJson(res, 200, {
-        status: 'ok',
-        product: 'AI-BOT',
-        protocol: VERSION,
-        specialists: (config.specialists ?? []).length,
-        models: (config.models ?? []).length,
-      })
+    registrarRotasDoTransporte(roteador, {
+      specialists: config.specialists ?? [],
+      models: config.models ?? [],
     })
 
     const stream = new StreamServer({
@@ -211,10 +211,10 @@ export const transportePlugin = {
     })
 
     const http = createServer((req, res) => {
-      void roteador.despachar(req, res).catch(() => {
-        // O despachar já respondeu 500; o relançamento dele é para o log de
-        // quem quiser um — aqui o processo não pode cair por uma rota quebrada.
-      })
+      // O seam agora fala fetch (Request/Response, a língua do Bun.serve e do
+      // Hono); este transporte Node traduz na borda DELE — o processo não pode
+      // cair por uma rota quebrada, então a falha vira 500 opaco.
+      void atenderComRoteador(roteador, req, res).catch(() => {})
     })
     http.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
       // Só o caminho do stream tem upgrade; o resto é 404 cru — responder JSON
@@ -243,4 +243,85 @@ export const transportePlugin = {
     const transporte = new Transporte(ctx, http, stream, host, porta)
     ctx.effect(() => () => transporte.fechar(), 'transporte:fechar')
   },
+}
+
+/* ------------------------- rotas HTTP do transporte ------------------------ */
+
+export interface CatalogoDoTransporte {
+  specialists: readonly string[]
+  models: readonly Model[]
+}
+
+/**
+ * As rotas HTTP do transporte, registradas em QUALQUER implementação do seam
+ * (o chassis passa o RoteadorHono; este transporte Node passa o MiniRoteador)
+ * — uma função só para as duas produções serem a mesma por construção.
+ *
+ * A rota de saúde é a do oráculo, na mesma forma: CONTAGENS, nunca conteúdo —
+ * um health não autenticado não pode listar o catálogo de ninguém.
+ */
+export function registrarRotasDoTransporte(
+  roteador: RoteadorHttp,
+  catalogo: CatalogoDoTransporte,
+): void {
+  roteador.rota('GET', '/health', () =>
+    respondeJson(200, {
+      status: 'ok',
+      product: 'AI-BOT',
+      protocol: VERSION,
+      specialists: catalogo.specialists.length,
+      models: catalogo.models.length,
+    }),
+  )
+}
+
+/**
+ * A tradução node:http → fetch deste transporte. Só ele precisa dela (Bun.serve
+ * e Hono já falam fetch), por isso mora aqui e não no seam.
+ */
+async function atenderComRoteador(
+  roteador: RoteadorHttp,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  let resposta: Response
+  try {
+    resposta = await roteador.despachar(await paraRequest(req))
+  } catch {
+    resposta = respondeErro(500, 'internal', 'erro interno')
+  }
+  const cabecalhos: Record<string, string> = {}
+  resposta.headers.forEach((valor, nome) => {
+    cabecalhos[nome] = valor
+  })
+  res.writeHead(resposta.status, cabecalhos)
+  const corpo = Buffer.from(await resposta.arrayBuffer())
+  res.end(corpo)
+}
+
+/** Monta o Request fetch a partir do node:http (método, URL, cabeçalhos, corpo). */
+async function paraRequest(req: IncomingMessage): Promise<Request> {
+  const url = `http://${req.headers.host ?? '127.0.0.1'}${req.url ?? '/'}`
+  const headers = new Headers()
+  for (const [nome, valor] of Object.entries(req.headers)) {
+    if (typeof valor === 'string') headers.set(nome, valor)
+    else if (Array.isArray(valor)) for (const item of valor) headers.append(nome, item)
+  }
+  const metodo = req.method ?? 'GET'
+  if (metodo === 'GET' || metodo === 'HEAD') {
+    return new Request(url, { method: metodo, headers })
+  }
+  // Corpo BUFFERIZADO de propósito: as rotas do transporte são pequenas
+  // (health, catálogo) e o Buffer evita a dança de duplex/stream do undici —
+  // se um dia entrar upload por aqui, esta é a linha que muda.
+  const pedacos: Buffer[] = []
+  for await (const pedaco of req) {
+    pedacos.push(pedaco as Buffer)
+  }
+  const corpo = Buffer.concat(pedacos)
+  return new Request(url, {
+    method: metodo,
+    headers,
+    ...(corpo.length > 0 ? { body: corpo } : {}),
+  })
 }

@@ -35,13 +35,19 @@ próprio projeto de origem declara.
   - no chassis (fork da Onda 1): banco relacional migrado de Postgres para
     **drizzle + `bun:sqlite`** (`chassis.db`; schemas pg-core → sqlite-core,
     transações síncronas, LISTEN/NOTIFY → anúncio in-process, pgvector fora —
-    knowledge sem busca vetorial, pendência I7); **mount do CopilotKit
-    Intelligence fora do boot** (modo local R3 — o event log nosso é a
-    conversa; `copilot.ts` fica com prazo de morte onda 2/3); chat do app
-    atrás de flag (`VITE_CHAT_ENABLED`, desligada); testes portados de
-    bun:test para vitest; exclusões do §4.1 aplicadas no primeiro gesto
-    (`worker/`, `supervisor/`, `agent-bot/`, `agent-langgraph/`, `spire/` e o
-    pacote `postgres` não entraram); comentários novos em pt-BR.
+    knowledge sem busca vetorial, pendência I7); testes portados de bun:test
+    para vitest; exclusões do §4.1 aplicadas no primeiro gesto (`worker/`,
+    `supervisor/`, `agent-bot/`, `agent-langgraph/`, `spire/` e o pacote
+    `postgres` não entraram); comentários novos em pt-BR;
+  - na Onda 2 (conversa = event log): **`@copilotkit/runtime` removido do
+    server** — o mount do Intelligence e o runtime de chat morreram
+    (`copilot.ts` ficou só com o registro de agentes e a mensagem de papel
+    permanente); a conversa é servida pelo NOSSO protocolo WS
+    (hello/ready/replay) sobre `Bun.serve`, e os channels leem/escrevem o
+    event log; o chat do app fala esse protocolo (`app/src/lib/chat`) — o
+    `@copilotkit/react-core` saiu do caminho da conversa e permanece SÓ no
+    preview do playground, atrás de stub com prazo final na onda 3; decisão
+    registrada da onda: `@ag-ui/*` PERMANECE como protocolo de bots externos.
 - **Licença:**
 
 ```

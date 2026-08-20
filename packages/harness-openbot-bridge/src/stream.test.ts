@@ -15,13 +15,11 @@ import {
   SqliteEventStore,
   type Envelope,
   type EnvelopeInput,
-  type SessionMeta,
-  type SessionSeed,
-  type StorageDriver,
 } from '@aibot2/domain-events'
 
 import { ClienteWsDeTeste } from './teste-cliente-ws.js'
 import {
+  StoreComGancho,
   TOKEN_DE_TESTE,
   montarTransporte,
   semearSessaoDeFixture,
@@ -69,54 +67,9 @@ function comoEnvelope(valor: unknown): Envelope {
   return valor as Envelope
 }
 
-/** Store que DELEGA tudo e deixa o teste pendurar ganchos nos pontos críticos. */
-class StoreComGancho implements StorageDriver {
-  ganchoDepoisDoSince: ((fromSeq: number, limit: number | undefined) => Promise<void>) | undefined
-  ganchoAntesDoLastSeq: (() => Promise<void>) | undefined
-
-  constructor(private readonly interno: StorageDriver) {}
-
-  createSession(seed: SessionSeed): Promise<SessionMeta> {
-    return this.interno.createSession(seed)
-  }
-  getSession(id: string): Promise<SessionMeta> {
-    return this.interno.getSession(id)
-  }
-  updateSession(id: string, mutate: (meta: SessionMeta) => void): Promise<SessionMeta> {
-    return this.interno.updateSession(id, mutate)
-  }
-  markSynced(id: string, seq: number): Promise<void> {
-    return this.interno.markSynced(id, seq)
-  }
-  listSessions(): Promise<SessionMeta[]> {
-    return this.interno.listSessions()
-  }
-  deleteSession(id: string): Promise<void> {
-    return this.interno.deleteSession(id)
-  }
-  append(sessionId: string, input: EnvelopeInput): Promise<number> {
-    return this.interno.append(sessionId, input)
-  }
-  async since(sessionId: string, fromSeq: number, limit?: number): Promise<Envelope[]> {
-    const lote = await this.interno.since(sessionId, fromSeq, limit)
-    if (this.ganchoDepoisDoSince !== undefined) {
-      await this.ganchoDepoisDoSince(fromSeq, limit)
-    }
-    return lote
-  }
-  async lastSeq(sessionId: string): Promise<number> {
-    if (this.ganchoAntesDoLastSeq !== undefined) {
-      await this.ganchoAntesDoLastSeq()
-    }
-    return this.interno.lastSeq(sessionId)
-  }
-  truncateBefore(sessionId: string, beforeSeq: number): Promise<SessionMeta> {
-    return this.interno.truncateBefore(sessionId, beforeSeq)
-  }
-  close(): Promise<void> {
-    return this.interno.close()
-  }
-}
+// [Onda 2] O StoreComGancho mudou para teste-fixtures.ts: os MESMOS testes
+// nomeados agora rodam também contra o transporte do chassis (suíte Bun) e os
+// ganchos das invariantes têm de ser UMA definição.
 
 function eventoNovo(id: string, texto: string): EnvelopeInput {
   return {

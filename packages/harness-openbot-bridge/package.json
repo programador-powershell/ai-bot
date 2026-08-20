@@ -2,7 +2,7 @@
   "name": "@aibot2/harness-openbot-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Transporte do AI-BOT 2: servidor WebSocket RFC 6455 clean-room (forma do ws.go do oráculo), protocolo de stream hello/ready/replay/re-hello (forma do stream.go), eventbus por sessão e a montagem como plugins do harness-kernel. Roteador HTTP mínimo próprio sobre node:http — o Hono aguarda parecer TI/SI, e o seam RoteadorHttp existe para a troca ser mecânica quando/se ele for homologado.",
+  "description": "Transporte do AI-BOT 2: o protocolo de stream hello/ready/replay/re-hello (forma do stream.go) atrás do seam ConexaoDeStream, eventbus por sessão e a montagem como plugins do harness-kernel. [Onda 2] O RoteadorHttp fala fetch e ganhou a implementação Hono (produção do chassis); o WebSocket RFC 6455 clean-room e o MiniRoteador viraram dublês de teste/transporte Node.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,10 +14,15 @@
     "./teste-cliente-ws": {
       "types": "./dist/teste-cliente-ws.d.ts",
       "default": "./dist/teste-cliente-ws.js"
+    },
+    "./teste-fixtures": {
+      "types": "./dist/teste-fixtures.d.ts",
+      "default": "./dist/teste-fixtures.js"
     }
   },
   "dependencies": {
     "@aibot2/domain-events": "workspace:*",
-    "@aibot2/harness-kernel": "workspace:*"
+    "@aibot2/harness-kernel": "workspace:*",
+    "hono": "^4.10.0"
   }
 }
