@@ -1,0 +1,23 @@
+{
+  "name": "@aibot2/harness-openbot-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transporte do AI-BOT 2: servidor WebSocket RFC 6455 clean-room (forma do ws.go do oráculo), protocolo de stream hello/ready/replay/re-hello (forma do stream.go), eventbus por sessão e a montagem como plugins do harness-kernel. Roteador HTTP mínimo próprio sobre node:http — o Hono aguarda parecer TI/SI, e o seam RoteadorHttp existe para a troca ser mecânica quando/se ele for homologado.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./teste-cliente-ws": {
+      "types": "./dist/teste-cliente-ws.d.ts",
+      "default": "./dist/teste-cliente-ws.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*"
+  }
+}

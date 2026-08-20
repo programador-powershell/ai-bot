@@ -2,6 +2,12 @@
   "files": [],
   "references": [
     { "path": "packages/harness-kernel" },
-    { "path": "packages/domain/events" }
+    { "path": "packages/domain/events" },
+    { "path": "packages/harness-openbot-bridge" },
+    { "path": "packages/plugins/action-gateway" },
+    { "path": "packages/plugins/specialist-registry" },
+    { "path": "packages/plugins/needle-orchestrator" },
+    { "path": "packages/providers/needle" },
+    { "path": "server" }
   ]
 }

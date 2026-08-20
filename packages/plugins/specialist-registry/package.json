@@ -1,0 +1,18 @@
+{
+  "name": "@aibot2/specialist-registry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Os especialistas do AI-BOT 2 como dado (catálogo compilado + overlay corporativo a quente, tudo-ou-nada), montados como Service do kernel com onChange para o roteador. Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/harness-kernel": "workspace:*"
+  }
+}

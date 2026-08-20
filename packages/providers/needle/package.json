@@ -1,0 +1,22 @@
+{
+  "name": "@aibot2/provider-needle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider do seam OrchestratorModel: Needle Pro via HTTP loopback (health/route/orchestrate, Ready() degradando a cascata, teto de concorrência) e o scriptedNeedle de teste. Zero dependências de runtime fora do workspace (fetch nativo do Node 24).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/needle-orchestrator": "workspace:*"
+  },
+  "devDependencies": {
+    "@aibot2/harness-kernel": "workspace:*",
+    "@aibot2/specialist-registry": "workspace:*"
+  }
+}

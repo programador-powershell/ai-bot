@@ -1,0 +1,19 @@
+{
+  "name": "@aibot2/plugin-action-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O funil ÚNICO de efeitos do AI-BOT 2: Gate de permissões portado do oráculo Go, envelope audit-before-act do openbot (govern), Tool Output Gateway + Artifact Store e aprovação humana durável — tudo como Service do harness-kernel (ctx.actionGateway). Zero dependências de runtime externas (m1-plano §5 E4, decisão D3).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*"
+  }
+}

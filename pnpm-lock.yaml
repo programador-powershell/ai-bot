@@ -18,6 +18,68 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@24.13.3)
 
+  packages/domain/events: {}
+
+  packages/harness-kernel: {}
+
+  packages/harness-openbot-bridge:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../domain/events
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../harness-kernel
+
+  packages/plugins/action-gateway:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../../domain/events
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../../harness-kernel
+
+  packages/plugins/needle-orchestrator:
+    dependencies:
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../../harness-kernel
+      '@aibot2/specialist-registry':
+        specifier: workspace:*
+        version: link:../specialist-registry
+
+  packages/plugins/specialist-registry:
+    dependencies:
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../../harness-kernel
+
+  packages/providers/needle:
+    dependencies:
+      '@aibot2/needle-orchestrator':
+        specifier: workspace:*
+        version: link:../../plugins/needle-orchestrator
+    devDependencies:
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../../harness-kernel
+      '@aibot2/specialist-registry':
+        specifier: workspace:*
+        version: link:../../plugins/specialist-registry
+
+  server:
+    dependencies:
+      '@aibot2/domain-events':
+        specifier: workspace:*
+        version: link:../packages/domain/events
+      '@aibot2/harness-kernel':
+        specifier: workspace:*
+        version: link:../packages/harness-kernel
+      '@aibot2/harness-openbot-bridge':
+        specifier: workspace:*
+        version: link:../packages/harness-openbot-bridge
+
 packages:
 
   '@esbuild/aix-ppc64@0.28.2':

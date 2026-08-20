@@ -1,0 +1,13 @@
+{
+  "name": "@aibot2/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "O orquestrador do AI-BOT 2 como MONTAGEM: lê a config do ambiente (a forma do config.go do oráculo), sobe o harness-kernel e lista os plugins (event-log, session-bus, transporte). Lógica de transporte mora em @aibot2/harness-openbot-bridge; aqui só existe composição.",
+  "type": "module",
+  "main": "./dist/main.js",
+  "dependencies": {
+    "@aibot2/domain-events": "workspace:*",
+    "@aibot2/harness-kernel": "workspace:*",
+    "@aibot2/harness-openbot-bridge": "workspace:*"
+  }
+}

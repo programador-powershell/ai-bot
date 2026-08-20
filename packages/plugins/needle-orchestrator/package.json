@@ -1,0 +1,19 @@
+{
+  "name": "@aibot2/needle-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cascata de roteamento do AI-BOT 2 (fast router léxico com constantes calibradas → Needle via seam → LLM via seam) e o contrato OrchestratorDecision com schema fechado. Cérebro, não autoridade. Zero dependências de runtime fora do workspace.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/harness-kernel": "workspace:*",
+    "@aibot2/specialist-registry": "workspace:*"
+  }
+}
