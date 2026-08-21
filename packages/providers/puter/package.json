@@ -1,0 +1,19 @@
+{
+  "name": "@aibot2/provider-puter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Backend PUTER do WorkspaceManager (seam WorkspaceBackend): materialize baixa Puter→disco local, promote sobe disco→Puter em duas camadas (resultado em /Goals/<id>/artifacts + metadado em /history), NUNCA o descartável do container (isDisposable). A cerca worker+época fica no gerente e não muda. Cliente HTTP da conta real por fetch próprio (pendência declarada, sem SDK). Sem dependências de runtime fora do workspace (fetch/FormData nativos do Node 24).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@aibot2/domain-workspace": "workspace:*",
+    "@aibot2/plugin-puter-workspace": "workspace:*"
+  }
+}

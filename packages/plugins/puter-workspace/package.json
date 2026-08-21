@@ -1,0 +1,15 @@
+{
+  "name": "@aibot2/plugin-puter-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A árvore da conta no Puter (spec §23) como dado: endereços de /Bots/<ofício>, /Goals/<id>/{workspace,artifacts,staging,history} e /Shared (1 conta = 1 pessoa; Goal compartilhado, nunca duplicado por bot), provisionamento idempotente, o contrato PuterFs (superfície mínima: mkdir/write/read/readdir/exists) e um Puter FALSO em memória fiel ao contrato. Zero dependências de runtime.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  }
+}

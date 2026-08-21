@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./fence-contract": {
+      "types": "./dist/fence-contract.d.ts",
+      "default": "./dist/fence-contract.js"
     }
   }
 }

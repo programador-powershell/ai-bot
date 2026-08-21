@@ -3,14 +3,17 @@
  * aceites E7: Validate exige CADA campo; o plano persistente não carrega
  * caminho físico; e a cerca do Promote com o cenário §25 (PC-02 época 4
  * volta do limbo e é recusado; PC-03 época 5 promove).
+ *
+ * A cerca (§25) agora vem da suíte REUTILIZÁVEL fence-contract, rodada aqui
+ * com o backend LOCAL — a MESMA suíte roda em providers/puter com o backend
+ * puter e passa igual (aceite da Onda 6). O que é específico do local (constatar
+ * o inplace, recusar staging desconhecido) fica neste arquivo.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
-  INPLACE_STAGING,
   LOCAL_WORKER,
   NoExecutionError,
-  StaleWorkspaceError,
   WorkspaceManager,
   localPath,
   localUri,
@@ -18,10 +21,10 @@ import {
   requireMaterialized,
   stagingUri,
   validatePlan,
-  type CurrentLease,
   type Leases,
   type WorkspacePlan,
 } from './index.js'
+import { fenceContract } from './fence-contract.js'
 
 function fullPlan(): WorkspacePlan {
   return {
@@ -38,17 +41,6 @@ function fullPlan(): WorkspacePlan {
     runtime: { snapshotDigest: 'node-24/19f810' },
     staging: { uri: 'puter:///Goals/goal-crm/staging/t7/epoch-17' },
     baseline: { revision: 'r1', manifestDigest: 'abc123' },
-  }
-}
-
-/** Lease comandável — encena a perda do lease NO MEIO da execução. */
-class CommandedLeases implements Leases {
-  constructor(private lease: CurrentLease) {}
-  switchTo(workerId: string, epoch: number): void {
-    this.lease = { workerId, epoch }
-  }
-  async currentLease(): Promise<CurrentLease> {
-    return this.lease
   }
 }
 
@@ -153,44 +145,11 @@ describe('o plano persistente não carrega caminho físico (spec §21)', () => {
   })
 })
 
-describe('Promote com cerca worker+época — o cenário §25', () => {
-  it('PC-03 na época 5 (dona atual) PROMOVE', async () => {
-    const leases = new CommandedLeases({ workerId: 'pc-03', epoch: 5 })
-    const manager = new WorkspaceManager({ roots: () => 'C:/p', leases })
-    const plan = await manager.plan({ sessionId: 's1', taskId: 't2', botId: 'code' })
-    expect(plan.workerId).toBe('pc-03')
-    expect(plan.leaseEpoch).toBe(5)
+// A cerca §25, backend-agnóstica, vem da suíte compartilhada — aqui com o
+// backend LOCAL (padrão do gerente). É a MESMA suíte que providers/puter roda.
+fenceContract('local', (leases: Leases) => new WorkspaceManager({ roots: () => 'C:/p', leases }))
 
-    await expect(manager.promote(plan, { stagingUri: INPLACE_STAGING })).resolves.toBeUndefined()
-  })
-
-  it('PC-02 época 4 volta do limbo e é RECUSADO — stale epoch nunca promove', async () => {
-    // PC-02 congelou o plano na época 4...
-    const leases = new CommandedLeases({ workerId: 'pc-02', epoch: 4 })
-    const manager = new WorkspaceManager({ roots: () => 'C:/p', leases })
-    const planVelho = await manager.plan({ sessionId: 's1', taskId: 't2', botId: 'code' })
-    expect(planVelho.leaseEpoch).toBe(4)
-
-    // ...ficou 40s sem rede, o lease venceu e o PC-03 assumiu na época 5.
-    leases.switchTo('pc-03', 5)
-
-    // PC-02 termina o trabalho e tenta transformá-lo em verdade: a cerca barra.
-    await expect(manager.promote(planVelho, { stagingUri: INPLACE_STAGING })).rejects.toThrow(
-      StaleWorkspaceError,
-    )
-  })
-
-  it('mesma época em OUTRO worker também é stale — a cerca compara a tríade, não só o número', async () => {
-    const leases = new CommandedLeases({ workerId: 'pc-02', epoch: 5 })
-    const manager = new WorkspaceManager({ roots: () => 'C:/p', leases })
-    const plan = await manager.plan({ sessionId: 's1', taskId: 't2' })
-
-    leases.switchTo('pc-03', 5)
-    await expect(manager.promote(plan, { stagingUri: INPLACE_STAGING })).rejects.toThrow(
-      StaleWorkspaceError,
-    )
-  })
-
+describe('Promote — o que é específico do backend LOCAL', () => {
   it('staging desconhecido não promove nem com lease válido — v1 só sabe constatar o inplace', async () => {
     const manager = new WorkspaceManager({ roots: () => 'C:/p' })
     const plan = await manager.plan({ sessionId: 's1', taskId: 't2' })

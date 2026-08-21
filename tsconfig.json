@@ -17,6 +17,8 @@
     { "path": "packages/plugins/context-runtime" },
     { "path": "packages/plugins/browser-runtime" },
     { "path": "packages/plugins/runtime-snapshots" },
+    { "path": "packages/plugins/puter-workspace" },
+    { "path": "packages/providers/puter" },
     { "path": "worker-daemon" },
     { "path": "server" },
     { "path": "agent-computer" },

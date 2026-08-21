@@ -1,6 +1,7 @@
 /**
  * @aibot2/domain-workspace — Plan congelado, materialização e Promote com
- * cerca worker+época.
+ * cerca worker+época, com o ONDE/COMO dos bytes atrás do seam WorkspaceBackend
+ * (local por padrão; Puter entra em providers/puter sem tocar a cerca).
  */
 
 export {
@@ -21,6 +22,8 @@ export {
   type WorkspaceStaging,
 } from './plan.js'
 
+export { SNAPSHOT_EXCLUDES, isDisposable } from './snapshot.js'
+
 export {
   NoExecutionError,
   requireMaterialized,
@@ -28,11 +31,17 @@ export {
 } from './execution.js'
 
 export {
+  LocalWorkspaceBackend,
+  type PlanContext,
+  type Publication,
+  type WorkspaceBackend,
+} from './backend.js'
+
+export {
   StaleWorkspaceError,
   WorkspaceManager,
   type CurrentLease,
   type Leases,
   type PlanRequest,
-  type Publication,
   type WorkspaceManagerOptions,
 } from './manager.js'

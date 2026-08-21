@@ -6,23 +6,27 @@
  * promove é o CONTROL PLANE, e só a época que ainda é dona. É a regra do
  * escritor único (que já valia para o log) aplicada aos arquivos.
  *
- * O backend v1 é local (uma pasta desta máquina, staging inplace); o Puter e
- * o worker-daemon trocam o backend DEPOIS — a cerca não muda uma linha, que é
- * exatamente o que o desenho prometia.
+ * A partir da Onda 6 o ONDE/COMO dos bytes vive atrás de um seam
+ * (WorkspaceBackend): o local é o padrão; o Puter entra como OUTRO backend sem
+ * tocar UMA LINHA da cerca abaixo — que é exatamente o que o desenho prometia.
  */
 
 import {
-  HOST_SNAPSHOT,
-  INPLACE_STAGING,
-  LIVE_REVISION,
-  LOCAL_PROVIDER,
   LOCAL_WORKER,
-  localPath,
-  localUri,
+  HOST_SNAPSHOT,
+  LIVE_REVISION,
   validatePlan,
   type WorkspacePlan,
 } from './plan.js'
+import {
+  LocalWorkspaceBackend,
+  type PlanContext,
+  type Publication,
+  type WorkspaceBackend,
+} from './backend.js'
 import type { WorkspaceExecution } from './execution.js'
+
+export type { Publication } from './backend.js'
 
 /**
  * A CERCA: o plano foi congelado com um worker/época que não detém mais o
@@ -58,11 +62,6 @@ class LocalLeases implements Leases {
   }
 }
 
-/** O que o worker publicou no staging e quer ver promovido. */
-export interface Publication {
-  stagingUri: string
-}
-
 /** O que o chamador sabe na hora de congelar; o resto é decisão do gerente. */
 export interface PlanRequest {
   sessionId: string
@@ -76,26 +75,36 @@ export interface PlanRequest {
 
 export interface WorkspaceManagerOptions {
   /**
-   * Resolve a pasta de projeto de uma sessão — o backend v1 do Source (a
-   * MESMA função que alimentava o Toolbox.Root do oráculo).
+   * Resolve a pasta de projeto de uma sessão — o backend local a usa para o
+   * Source (a MESMA função que alimentava o Toolbox.Root do oráculo). Backends
+   * remotos (puter) ignoram: para eles o endereço é o Goal, não uma pasta.
    */
   roots?: (sessionId: string) => string
   /** O dono dos leases DE VERDADE (a frota). Ausente = local/1 fixo da v1. */
   leases?: Leases
+  /**
+   * O backend dos bytes. Ausente = local (esta máquina). É por AQUI que o
+   * Puter entra sem que a cerca abaixo mude.
+   */
+  backend?: WorkspaceBackend
 }
 
 export class WorkspaceManager {
   readonly #roots: ((sessionId: string) => string) | undefined
   readonly #leases: Leases
+  readonly #backend: WorkspaceBackend
 
   constructor(options: WorkspaceManagerOptions = {}) {
     this.#roots = options.roots
     this.#leases = options.leases ?? new LocalLeases()
+    this.#backend = options.backend ?? new LocalWorkspaceBackend()
   }
 
   /**
    * Congela o contrato da execução. É AQUI que worker, época e workspace são
-   * decididos — a ferramenta lá na ponta só lê o que foi congelado.
+   * decididos — a ferramenta lá na ponta só lê o que foi congelado. Source e
+   * staging vêm do backend (o local endereça a pasta; o puter, o Goal), mas a
+   * tríade worker+época que a cerca confere é decidida AQUI, sempre.
    */
   async plan(request: PlanRequest): Promise<WorkspacePlan> {
     const sessionId = request.sessionId.trim()
@@ -113,33 +122,41 @@ export class WorkspaceManager {
       botId = 'chat'
     }
     const attempt = request.attempt !== undefined && request.attempt > 0 ? request.attempt : 1
+    const goalId = (request.goalId ?? '').trim() || `goal-${sessionId}`
 
     const lease = await this.#leases.currentLease(taskId)
 
     const root = this.#roots !== undefined ? this.#roots(sessionId).trim() : ''
+    const ctx: PlanContext = {
+      sessionId,
+      goalId,
+      taskId,
+      botId,
+      attempt,
+      workerId: lease.workerId,
+      leaseEpoch: lease.epoch,
+      root,
+    }
+
     const plan: WorkspacePlan = {
       // Determinístico de propósito: mesmo pedido, mesmo id — sem relógio nem
       // aleatório, o plano sobrevive a replay e a comparação em teste.
       id: `wp-${sessionId}-${taskId}-${attempt}`,
       userId: LOCAL_WORKER, // v1: máquina de uma pessoa; multiusuário chega com o Puter
-      goalId: (request.goalId ?? '').trim() || `goal-${sessionId}`,
+      goalId,
       sessionId,
       taskId,
       botId,
       attempt,
       workerId: lease.workerId,
       leaseEpoch: lease.epoch,
-      source: {
-        provider: LOCAL_PROVIDER,
-        uri: localUri(root),
-        revision: LIVE_REVISION,
-      },
+      source: this.#backend.source(ctx),
       runtime: {
         profile: HOST_SNAPSHOT,
         snapshotDigest: HOST_SNAPSHOT,
         arch: process.arch,
       },
-      staging: { uri: INPLACE_STAGING },
+      staging: this.#backend.staging(ctx),
       baseline: { revision: LIVE_REVISION, manifestDigest: LIVE_REVISION },
     }
     validatePlan(plan)
@@ -147,34 +164,28 @@ export class WorkspaceManager {
   }
 
   /**
-   * Transforma o plano em execução NESTA máquina. No backend local é resolver
-   * a URI de volta para a pasta; no Puter será baixar snapshot + montar o
-   * workspace + preparar o git sombra.
+   * Transforma o plano em execução NESTA máquina. O QUE isso significa é do
+   * backend: no local é resolver a URI de volta para a pasta; no Puter é baixar
+   * o snapshot + montar o workspace + preparar o staging local.
    */
   async materialize(plan: WorkspacePlan): Promise<WorkspaceExecution> {
     validatePlan(plan)
-    if (plan.source.provider !== LOCAL_PROVIDER) {
-      throw new Error(`esta máquina não sabe materializar o provider "${plan.source.provider}"`)
-    }
-    return { plan, localRoot: localPath(plan.source.uri) }
+    return this.#backend.materialize(plan)
   }
 
   /**
    * A CERCA em código: só o worker que detém o lease, na época em que o plano
    * foi congelado, transforma staging em verdade. É o cenário §25 da spec —
    * PC-02 que volta do limbo com época velha é RECUSADO; PC-03 na época atual
-   * promove — e nenhum chamador precisa aprender regra nova quando o staging
-   * de verdade entrar.
+   * promove. A checagem fica AQUI, indiferente ao backend: por isso a mesma
+   * suíte passa com o backend puter injetado (o aceite da Onda 6).
    */
   async promote(plan: WorkspacePlan, result: Publication): Promise<void> {
     const current = await this.#leases.currentLease(plan.taskId)
     if (current.workerId !== plan.workerId || current.epoch !== plan.leaseEpoch) {
       throw new StaleWorkspaceError()
     }
-    if (result.stagingUri === INPLACE_STAGING) {
-      // v1: o trabalho já está no workspace — promover é constatar.
-      return
-    }
-    throw new Error(`esta máquina não sabe promover "${result.stagingUri}"`)
+    // A cerca passou: só agora o backend efetiva a publicação de verdade.
+    await this.#backend.promote(plan, result)
   }
 }
