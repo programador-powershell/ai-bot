@@ -12,3 +12,19 @@ export {
   type SnapshotIndexEntry,
   type SnapshotKey,
 } from './fingerprint.js'
+export {
+  RUNTIME_KINDS,
+  RuntimeResolver,
+  admitRuntime,
+  isRuntimeKind,
+  resolveRuntimeBinding,
+  resolveRuntimeTarget,
+  runtimeExec,
+  runtimeWorkdir,
+  type RuntimeAdmission,
+  type RuntimeBinding,
+  type RuntimeExec,
+  type RuntimeHostCapabilities,
+  type RuntimeKind,
+  type RuntimeTarget,
+} from './resolver.js'

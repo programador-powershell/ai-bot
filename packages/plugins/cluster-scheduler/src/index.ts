@@ -18,4 +18,13 @@ export {
   type TaskOutcome,
 } from './engine.js'
 
+export {
+  DaemonTaskExecutor,
+  type DaemonCommand,
+  type DaemonEndpoint,
+  type DaemonTaskExecutorOptions,
+  type FetchLike,
+  type ReportedEvent,
+} from './executor.js'
+
 export { ClusterScheduler, type ClusterSchedulerConfig } from './service.js'

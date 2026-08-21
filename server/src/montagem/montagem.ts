@@ -43,7 +43,12 @@ import { SpecialistRegistry } from '@aibot2/specialist-registry'
 import { RouterService } from '@aibot2/needle-orchestrator'
 import * as contextRuntime from '@aibot2/plugin-context-runtime'
 import { FsCheckpointStore, type ChatModel } from '@aibot2/plugin-context-runtime'
-import { ClusterScheduler, type TaskExecutor } from '@aibot2/cluster-scheduler'
+import {
+  ClusterScheduler,
+  DaemonTaskExecutor,
+  type DaemonTaskExecutorOptions,
+  type TaskExecutor,
+} from '@aibot2/cluster-scheduler'
 import { BrowserRuntimeService } from '@aibot2/plugin-browser-runtime'
 import { RuntimeSnapshots } from '@aibot2/runtime-snapshots'
 
@@ -66,8 +71,19 @@ export interface OpcoesDeMontagem {
   policy?: unknown
   /** O provedor de modelo do agent loop (M2). Ausente = seam declarado. */
   model?: ChatModel
-  /** O cliente real dos 9 verbos §36 (Onda 5). Ausente = seam declarado. */
+  /**
+   * O cliente real dos 9 verbos §36 (Onda 5), já montado. Precede `daemon`;
+   * ausente ambos = seam declarado.
+   */
   taskExecutor?: TaskExecutor
+  /**
+   * A configuração para MONTAR o DaemonTaskExecutor da Onda 5 aqui — o handoff
+   * scheduler→worker-daemon ligado no server. Uma estação com daemon passa
+   * `endpointFor`/`commandFor`; sem isso, o seam declarado segue valendo (o
+   * despacho recusa em vez de fingir execução). O executor NÃO decide máquina —
+   * o scheduler decide e o endpointFor só resolve o endpoint do escolhido.
+   */
+  daemon?: DaemonTaskExecutorOptions
   /** O agent-computer, quando esta estação tem um. Ausente, browser-runtime fica fora — declarado no log. */
   browser?: { baseUrl: string; token: string }
   /**
@@ -150,12 +166,18 @@ export async function montarNucleo(
     })
 
     // O control plane (E7): frota durável em arquivo no dataDir, workspaces
-    // locais (backend v1) e o executor da Onda 5 como dívida declarada.
+    // locais (backend v1) e o executor da Onda 5. O executor real (cliente HTTP
+    // dos 9 verbos §36) entra quando esta estação tem daemon configurado; sem
+    // isso, o seam declarado recusa o despacho em vez de fingir execução.
     await ctx.plugin(ClusterScheduler, {
       store: ctx.eventos,
       fleet: new Fleet({ state: new JsonFileFleetState(join(config.dataDir, 'fleet')) }),
       workspaces: new WorkspaceManager(),
-      executor: opcoes?.taskExecutor ?? executorDaOnda5(),
+      executor:
+        opcoes?.taskExecutor ??
+        (opcoes?.daemon !== undefined
+          ? new DaemonTaskExecutor(opcoes.daemon)
+          : executorDaOnda5()),
     })
 
     // O navegador task-scoped (§32) — só quando esta estação TEM agent-computer

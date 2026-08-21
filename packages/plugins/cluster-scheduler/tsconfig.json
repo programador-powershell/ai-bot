@@ -13,6 +13,7 @@
     { "path": "../../domain/runtime" },
     { "path": "../../domain/tasks" },
     { "path": "../../domain/workers" },
-    { "path": "../../domain/workspace" }
+    { "path": "../../domain/workspace" },
+    { "path": "../../../worker-daemon" }
   ]
 }

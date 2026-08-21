@@ -134,6 +134,9 @@
         "@aibot2/domain-workspace": "workspace:*",
         "@aibot2/harness-kernel": "workspace:*",
       },
+      "devDependencies": {
+        "@aibot2/worker-daemon": "workspace:*",
+      },
     },
     "packages/plugins/context-runtime": {
       "name": "@aibot2/plugin-context-runtime",

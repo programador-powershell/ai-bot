@@ -49,15 +49,19 @@ export function modeloAusente(): ChatModel {
 }
 
 /**
- * O TaskExecutor REAL (cliente HTTP dos 9 verbos §36 do worker-daemon) é a
- * entrega da Onda 5. Até lá, despachar uma tarefa ao cluster falha com o
- * motivo — o scheduler, os tetos e a cerca já valem; o elo com o daemon não.
+ * O TaskExecutor REAL (cliente HTTP dos 9 verbos §36 do worker-daemon) FOI
+ * entregue na Onda 5 — é o DaemonTaskExecutor do cluster-scheduler, montado pela
+ * montagem quando `opcoes.daemon` chega (endpointFor/commandFor de uma estação
+ * com daemon). Este seam é o que sobra para a estação SEM daemon configurado:
+ * despachar uma tarefa ao cluster falha com o motivo — o scheduler, os tetos e
+ * a cerca já valem; o elo com o daemon só liga quando há daemon para ligar.
  */
 export function executorDaOnda5(): TaskExecutor {
   return {
     async run(): Promise<string> {
       throw new Error(
-        "o despacho ao worker-daemon ainda não está ligado (TaskExecutor real é a Onda 5) — " +
+        "nenhum worker-daemon está configurado nesta estação (sem AIBOT daemon) — " +
+          "o DaemonTaskExecutor da Onda 5 existe, mas sem endpoint para despachar " +
           "a tarefa foi recusada em vez de fingir execução",
       );
     },

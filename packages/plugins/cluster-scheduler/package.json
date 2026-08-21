@@ -20,5 +20,8 @@
     "@aibot2/domain-workers": "workspace:*",
     "@aibot2/domain-workspace": "workspace:*",
     "@aibot2/harness-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@aibot2/worker-daemon": "workspace:*"
   }
 }
